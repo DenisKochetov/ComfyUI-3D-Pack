@@ -1,5 +1,4 @@
 # build tools
-cmake
 ninja
 pccm
 
