@@ -1,6 +1,7 @@
 # build tools
 cmake
 ninja
+pccm
 
 # web tools
 PyGithub
@@ -48,6 +49,7 @@ libigl
 pyvista
 pymeshfix
 igraph
+diso
 
 # configs & extra
 torchtyping>=0.1.5

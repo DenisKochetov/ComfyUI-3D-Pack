@@ -43,8 +43,22 @@ Your ComfyUI Root Directory\python_embeded\python.exe install.py
 
 
 ## Features:
-- For use cases please check out [Example Workflows](./_Example_Workflows/). [**Last update: 22/January/2025**]
+- For use cases please check out [Example Workflows](./_Example_Workflows/). [**Last update: 29/April/2025**]
   - **Note:** you need to put [Example Inputs Files & Folders](_Example_Workflows/_Example_Inputs_Files/) under ComfyUI Root Directory\ComfyUI\input folder before you can run the example workflow
+
+- **Hunyuan3D_V2**: turbo, mini, fast, multiview
+  - Single image to 3D Mesh
+  - Multi-views to 3D Mesh with RGB texture
+  - Model weights: https://huggingface.co/tencent/Hunyuan3D-2, https://huggingface.co/tencent/Hunyuan3D-2mini
+  - [Workflows](./_Example_Workflows/Hunyuan3D_V2)
+    
+  <video controls autoplay loop src="https://github.com/user-attachments/assets/ae0f68d8-edd3-4bdd-9a9a-1f5ccc07a3d0"></video>
+
+- **TripoSG**: [VAST-AI-Research/TripoSG](https://github.com/VAST-AI-Research/TripoSG)
+  - Single image (Reference or Scribble) to 3D Mesh
+  - Model weights: https://huggingface.co/VAST-AI/TripoSG, https://huggingface.co/VAST-AI/TripoSG-scribble
+
+  <video controls autoplay loop src="https://github.com/user-attachments/assets/7b7969c1-e7c8-465b-9605-8bba7e847dbf"></video>
 
 - **TRELLIS**: [microsoft/TRELLIS](https://github.com/microsoft/TRELLIS)
   - Single image to 3D Mesh with RGB texture
@@ -57,6 +71,7 @@ Your ComfyUI Root Directory\python_embeded\python.exe install.py
     1. Single image to 3D Mesh shape only
     2. 3D Mesh shape + Single reference image to 3D Mesh with RGB texture
   - Model weights: https://huggingface.co/tencent/Hunyuan3D-2/tree/main
+  - [Workflows](https://github.com/DenisKochetov/ComfyUI-3D-Pack/tree/dev/_Example_Workflows/Hunyuan3D_V2)
 
   <video controls autoplay loop src="https://github.com/user-attachments/assets/da6a8f8b-8dab-4460-90a6-44769ec9bb09"></video>
 
