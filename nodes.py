@@ -348,6 +348,39 @@ class Save_3D_Mesh:
 
         return (save_path, )
     
+class Save3DMeshAdvanced:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "mesh": ("MESH",),
+                "folder_path": ("STRING",),
+                "file_name": ("STRING",),
+                "file_format": (["glb", "obj", "ply"],),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("save_path",)
+    FUNCTION = "save_mesh"
+    CATEGORY = "Comfy3D/Import|Export"
+    OUTPUT_NODE = True
+
+    def save_mesh(self, mesh, folder_path, file_name, file_format):
+        base_dir = comfy_paths.output_directory
+        if folder_path.strip() != "":
+            base_dir = os.path.join(base_dir, folder_path.strip())
+
+        os.makedirs(base_dir, exist_ok=True)
+
+        file_name = os.path.splitext(file_name.strip())[0]
+
+        full_path = os.path.join(base_dir, f"{file_name}.{file_format}")
+
+        mesh.write(full_path)
+
+        return (full_path,)
+    
 class Save_3DGS:
 
     @classmethod
