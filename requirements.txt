@@ -1,6 +1,7 @@
 # build tools
 cmake
 ninja
+pccm
 
 # web tools
 PyGithub
@@ -15,6 +16,7 @@ opencv-python
 pillow
 nerfacc>=0.5.3
 slangtorch
+cumm
 git+https://github.com/EasternJournalist/utils3d.git#egg=utils3d
 
 # for use ML models
@@ -22,6 +24,7 @@ diffusers>=0.26.1
 transformers>=4.36.2
 safetensors
 open_clip_torch
+mmgp
 
 # for training differentiable tensors
 torchmetrics
