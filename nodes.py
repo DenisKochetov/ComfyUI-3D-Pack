@@ -96,8 +96,8 @@ from CRM_T2I_V3.model.crm.sampler import CRMSamplerV3
 from Hunyuan3D_V1.mvd.hunyuan3d_mvd_std_pipeline import HunYuan3D_MVD_Std_Pipeline
 from Hunyuan3D_V1.mvd.hunyuan3d_mvd_lite_pipeline import Hunyuan3D_MVD_Lite_Pipeline
 from Hunyuan3D_V1.infer import Views2Mesh
-from Hunyuan3D_V2.hy3dgen.shapegen import FaceReducer, FloaterRemover, DegenerateFaceRemover, Hunyuan3DDiTFlowMatchingPipeline
-from Hunyuan3D_V2.hy3dgen.texgen import Hunyuan3DPaintPipeline
+# from Hunyuan3D_V2.hy3dgen.shapegen import FaceReducer, FloaterRemover, DegenerateFaceRemover, Hunyuan3DDiTFlowMatchingPipeline
+# from Hunyuan3D_V2.hy3dgen.texgen import Hunyuan3DPaintPipeline
 from Hunyuan3D_V2.hy3dgen.rembg import BackgroundRemover
 from TRELLIS.trellis.pipelines import TrellisImageTo3DPipeline
 from TRELLIS.trellis.utils import postprocessing_utils
@@ -138,8 +138,8 @@ DIFFUSERS_PIPE_DICT = OrderedDict([
     ("Unique3DImageCustomPipeline", StableDiffusionImageCustomPipeline),
     ("HunYuan3DMVDStdPipeline", HunYuan3D_MVD_Std_Pipeline),
     ("Hunyuan3DMVDLitePipeline", Hunyuan3D_MVD_Lite_Pipeline),
-    ("Hunyuan3DDiTFlowMatchingPipeline", Hunyuan3DDiTFlowMatchingPipeline),
-    ("Hunyuan3DPaintPipeline", Hunyuan3DPaintPipeline),
+    # ("Hunyuan3DDiTFlowMatchingPipeline", Hunyuan3DDiTFlowMatchingPipeline),
+    # ("Hunyuan3DPaintPipeline", Hunyuan3DPaintPipeline),
     ("TripoSGPipeline", TripoSGPipeline),
     ("TripoSGScribblePipeline", TripoSGScribblePipeline),
 ])
@@ -364,6 +364,39 @@ class Save_3D_Mesh:
             mesh.write(save_path)
 
         return (save_path, )
+
+class Save3DMeshAdvanced:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "mesh": ("MESH",),
+                "folder_path": ("STRING",),
+                "file_name": ("STRING",),
+                "file_format": (["glb", "obj", "ply"],),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("save_path",)
+    FUNCTION = "save_mesh"
+    CATEGORY = "Comfy3D/Import|Export"
+    OUTPUT_NODE = True
+
+    def save_mesh(self, mesh, folder_path, file_name, file_format):
+        base_dir = comfy_paths.output_directory
+        if folder_path.strip() != "":
+            base_dir = os.path.join(base_dir, folder_path.strip())
+
+        os.makedirs(base_dir, exist_ok=True)
+
+        file_name = os.path.splitext(file_name.strip())[0]
+
+        full_path = os.path.join(base_dir, f"{file_name}.{file_format}")
+
+        mesh.write(full_path)
+
+        return (full_path,)    
     
 class Save_3DGS:
 
@@ -4263,130 +4296,130 @@ class TripoSG_Scribble_Model:
 
         return (mesh,)
 
-class Load_Hunyuan3D_V2_ShapeGen_Pipeline:
-    CATEGORY      = "Comfy3D/Algorithm"
-    RETURN_TYPES  = ("DIFFUSERS_PIPE",)
-    RETURN_NAMES  = ("shapegen_pipe",)
-    FUNCTION      = "load"
+# class Load_Hunyuan3D_V2_ShapeGen_Pipeline:
+#     CATEGORY      = "Comfy3D/Algorithm"
+#     RETURN_TYPES  = ("DIFFUSERS_PIPE",)
+#     RETURN_NAMES  = ("shapegen_pipe",)
+#     FUNCTION      = "load"
 
-    _REPO_ID_BASE = "tencent"
+#     _REPO_ID_BASE = "tencent"
 
-    _MODES = {
-        "Hunyuan3D-2":             ("Hunyuan3D-2",     "hunyuan3d-dit-v2-0",         30),
-        "Hunyuan3D-2-Fast":        ("Hunyuan3D-2",     "hunyuan3d-dit-v2-0-fast",    20),
-        "Hunyuan3D-2-Turbo":       ("Hunyuan3D-2",     "hunyuan3d-dit-v2-0-turbo",    5),
-        "Hunyuan3D-2mini":         ("Hunyuan3D-2mini", "hunyuan3d-dit-v2-mini",       30),
-        "Hunyuan3D-2mini-Fast":    ("Hunyuan3D-2mini", "hunyuan3d-dit-v2-mini-fast",   20),
-        "Hunyuan3D-2mini-Turbo":   ("Hunyuan3D-2mini", "hunyuan3d-dit-v2-mini-turbo",  5),
-        "Hunyuan3D-2mv":           ("Hunyuan3D-2mv",   "hunyuan3d-dit-v2-mv",   30),
-        "Hunyuan3D-2mv-Fast":      ("Hunyuan3D-2mv",   "hunyuan3d-dit-v2-mv-fast",    20),
-        "Hunyuan3D-2mv-Turbo":     ("Hunyuan3D-2mv",   "hunyuan3d-dit-v2-mv-turbo",   5),
-    }
+#     _MODES = {
+#         "Hunyuan3D-2":             ("Hunyuan3D-2",     "hunyuan3d-dit-v2-0",         30),
+#         "Hunyuan3D-2-Fast":        ("Hunyuan3D-2",     "hunyuan3d-dit-v2-0-fast",    20),
+#         "Hunyuan3D-2-Turbo":       ("Hunyuan3D-2",     "hunyuan3d-dit-v2-0-turbo",    5),
+#         "Hunyuan3D-2mini":         ("Hunyuan3D-2mini", "hunyuan3d-dit-v2-mini",       30),
+#         "Hunyuan3D-2mini-Fast":    ("Hunyuan3D-2mini", "hunyuan3d-dit-v2-mini-fast",   20),
+#         "Hunyuan3D-2mini-Turbo":   ("Hunyuan3D-2mini", "hunyuan3d-dit-v2-mini-turbo",  5),
+#         "Hunyuan3D-2mv":           ("Hunyuan3D-2mv",   "hunyuan3d-dit-v2-mv",   30),
+#         "Hunyuan3D-2mv-Fast":      ("Hunyuan3D-2mv",   "hunyuan3d-dit-v2-mv-fast",    20),
+#         "Hunyuan3D-2mv-Turbo":     ("Hunyuan3D-2mv",   "hunyuan3d-dit-v2-mv-turbo",   5),
+#     }
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "generation_mode": (list(cls._MODES.keys()),),
-                "weights_format" : (["safetensors", "ckpt"],),
-                "flash_vdm"      : ("BOOLEAN", {"default": True}),
-            }
-        }
+#     @classmethod
+#     def INPUT_TYPES(cls):
+#         return {
+#             "required": {
+#                 "generation_mode": (list(cls._MODES.keys()),),
+#                 "weights_format" : (["safetensors", "ckpt"],),
+#                 "flash_vdm"      : ("BOOLEAN", {"default": True}),
+#             }
+#         }
 
-    @staticmethod
-    def _ensure_weights(repo: str, subfolder: str, use_safetensors: bool):
-        base_dir = os.path.join(CKPT_DIFFUSERS_PATH, f"{Load_Hunyuan3D_V2_ShapeGen_Pipeline._REPO_ID_BASE}/{repo}")
-        ckpt_file = "model.fp16.safetensors" if use_safetensors else "model.fp16.ckpt"
-        ckpt_path = os.path.join(base_dir, subfolder, ckpt_file)
+#     @staticmethod
+#     def _ensure_weights(repo: str, subfolder: str, use_safetensors: bool):
+#         base_dir = os.path.join(CKPT_DIFFUSERS_PATH, f"{Load_Hunyuan3D_V2_ShapeGen_Pipeline._REPO_ID_BASE}/{repo}")
+#         ckpt_file = "model.fp16.safetensors" if use_safetensors else "model.fp16.ckpt"
+#         ckpt_path = os.path.join(base_dir, subfolder, ckpt_file)
 
-        if not os.path.exists(ckpt_path):
-            snapshot_download(
-                repo_id=f"{Load_Hunyuan3D_V2_ShapeGen_Pipeline._REPO_ID_BASE}/{repo}",
-                repo_type="model",
-                local_dir=base_dir,
-                resume_download=True,
-                ignore_patterns = HF_DOWNLOAD_IGNORE
-            )
+#         if not os.path.exists(ckpt_path):
+#             snapshot_download(
+#                 repo_id=f"{Load_Hunyuan3D_V2_ShapeGen_Pipeline._REPO_ID_BASE}/{repo}",
+#                 repo_type="model",
+#                 local_dir=base_dir,
+#                 resume_download=True,
+#                 ignore_patterns = HF_DOWNLOAD_IGNORE
+#             )
 
-    @staticmethod
-    def _build_pipe(repo: str, subfolder: str, use_safetensors: bool, flash_vdm: bool):
-        Load_Hunyuan3D_V2_ShapeGen_Pipeline._ensure_weights(repo, subfolder, use_safetensors)
+#     @staticmethod
+#     def _build_pipe(repo: str, subfolder: str, use_safetensors: bool, flash_vdm: bool):
+#         Load_Hunyuan3D_V2_ShapeGen_Pipeline._ensure_weights(repo, subfolder, use_safetensors)
 
-        model_dir = os.path.join(CKPT_DIFFUSERS_PATH,
-                                 f"{Load_Hunyuan3D_V2_ShapeGen_Pipeline._REPO_ID_BASE}/{repo}",
-                                 subfolder)
-        ckpt = os.path.join(model_dir, "model.fp16.safetensors" if use_safetensors else "model.fp16.ckpt")
-        cfg  = os.path.join(model_dir, "config.yaml")
+#         model_dir = os.path.join(CKPT_DIFFUSERS_PATH,
+#                                  f"{Load_Hunyuan3D_V2_ShapeGen_Pipeline._REPO_ID_BASE}/{repo}",
+#                                  subfolder)
+#         ckpt = os.path.join(model_dir, "model.fp16.safetensors" if use_safetensors else "model.fp16.ckpt")
+#         cfg  = os.path.join(model_dir, "config.yaml")
 
-        pipe = Hunyuan3DDiTFlowMatchingPipeline.from_single_file(
-            ckpt_path=ckpt,
-            config_path=cfg,
-            device="cuda",
-            dtype=torch.float16,
-            use_safetensors=use_safetensors,
-            from_pretrained_kwargs={
-                "model_path": f"{Load_Hunyuan3D_V2_ShapeGen_Pipeline._REPO_ID_BASE}/{repo}",
-                "subfolder": subfolder,
-                "use_safetensors": use_safetensors,
-            },
-        )
+#         pipe = Hunyuan3DDiTFlowMatchingPipeline.from_single_file(
+#             ckpt_path=ckpt,
+#             config_path=cfg,
+#             device="cuda",
+#             dtype=torch.float16,
+#             use_safetensors=use_safetensors,
+#             from_pretrained_kwargs={
+#                 "model_path": f"{Load_Hunyuan3D_V2_ShapeGen_Pipeline._REPO_ID_BASE}/{repo}",
+#                 "subfolder": subfolder,
+#                 "use_safetensors": use_safetensors,
+#             },
+#         )
 
-        if flash_vdm and any(tag in subfolder for tag in ("turbo", "fast")):
-            pipe.enable_flashvdm(replace_vae=False)
+#         if flash_vdm and any(tag in subfolder for tag in ("turbo", "fast")):
+#             pipe.enable_flashvdm(replace_vae=False)
 
-        return pipe.to("cuda", torch.float16)
+#         return pipe.to("cuda", torch.float16)
 
-    def load(self, generation_mode, weights_format, flash_vdm):
-        repo, subfolder, def_steps = self._MODES[generation_mode]
-        use_safe = (weights_format == "safetensors")
-        pipe = self._build_pipe(repo, subfolder, use_safe, flash_vdm)
-        pipe.num_inference_steps = def_steps
-        return (pipe,)
+#     def load(self, generation_mode, weights_format, flash_vdm):
+#         repo, subfolder, def_steps = self._MODES[generation_mode]
+#         use_safe = (weights_format == "safetensors")
+#         pipe = self._build_pipe(repo, subfolder, use_safe, flash_vdm)
+#         pipe.num_inference_steps = def_steps
+#         return (pipe,)
     
-class Load_Hunyuan3D_V2_TexGen_Pipeline: 
-    CATEGORY     = "Comfy3D/Algorithm"
-    RETURN_TYPES = ("DIFFUSERS_PIPE",)
-    RETURN_NAMES = ("texgen_pipe",)
-    FUNCTION     = "load"
+# class Load_Hunyuan3D_V2_TexGen_Pipeline: 
+#     CATEGORY     = "Comfy3D/Algorithm"
+#     RETURN_TYPES = ("DIFFUSERS_PIPE",)
+#     RETURN_NAMES = ("texgen_pipe",)
+#     FUNCTION     = "load"
 
-    MODEL2REPO = {
-        "Standard": ("tencent/Hunyuan3D-2", "hunyuan3d-paint-v2-0"),
-        "Turbo":    ("tencent/Hunyuan3D-2", "hunyuan3d-paint-v2-0-turbo"),
-    }
+#     MODEL2REPO = {
+#         "Standard": ("tencent/Hunyuan3D-2", "hunyuan3d-paint-v2-0"),
+#         "Turbo":    ("tencent/Hunyuan3D-2", "hunyuan3d-paint-v2-0-turbo"),
+#     }
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {"required": {
-            "generation_mode": (list(cls.MODEL2REPO.keys()),),
-        }}
+#     @classmethod
+#     def INPUT_TYPES(cls):
+#         return {"required": {
+#             "generation_mode": (list(cls.MODEL2REPO.keys()),),
+#         }}
 
-    def _download_required_weights(self, repo_id, subfolder):
-        ckpt_download_dir = os.path.join(CKPT_DIFFUSERS_PATH, repo_id)
-        os.makedirs(ckpt_download_dir, exist_ok=True)
+#     def _download_required_weights(self, repo_id, subfolder):
+#         ckpt_download_dir = os.path.join(CKPT_DIFFUSERS_PATH, repo_id)
+#         os.makedirs(ckpt_download_dir, exist_ok=True)
 
-        # Only download the "delight" and target submodel directories
-        for folder in ["hunyuan3d-delight-v2-0", subfolder]:
-            snapshot_download(
-                repo_id=repo_id,
-                local_dir=ckpt_download_dir,
-                repo_type="model",
-                force_download=False,
-                ignore_patterns=HF_DOWNLOAD_IGNORE
-            )
+#         # Only download the "delight" and target submodel directories
+#         for folder in ["hunyuan3d-delight-v2-0", subfolder]:
+#             snapshot_download(
+#                 repo_id=repo_id,
+#                 local_dir=ckpt_download_dir,
+#                 repo_type="model",
+#                 force_download=False,
+#                 ignore_patterns=HF_DOWNLOAD_IGNORE
+#             )
 
-    def load(self, generation_mode):
-        repo_id, subfolder = self.MODEL2REPO[generation_mode]
+#     def load(self, generation_mode):
+#         repo_id, subfolder = self.MODEL2REPO[generation_mode]
 
-        self._download_required_weights(repo_id, subfolder)
+#         self._download_required_weights(repo_id, subfolder)
 
-        local_repo_dir = os.path.join(CKPT_DIFFUSERS_PATH, repo_id)
+#         local_repo_dir = os.path.join(CKPT_DIFFUSERS_PATH, repo_id)
 
-        pipe = Hunyuan3DPaintPipeline.from_pretrained(
-            model_path=local_repo_dir,
-            subfolder=subfolder
-        )
+#         pipe = Hunyuan3DPaintPipeline.from_pretrained(
+#             model_path=local_repo_dir,
+#             subfolder=subfolder
+#         )
 
-        return (pipe.to("cuda", torch.float16),)
+#         return (pipe.to("cuda", torch.float16),)
 
 class Hunyuan3D_V2_Paint_Model_Turbo_MV:
     """
@@ -4947,10 +4980,31 @@ class Load_MVAdapter_T2MV_Pipeline:
     def load(cls, base_model, vae_model, adapter_path, scheduler, num_views, 
              use_fp16, use_mmgp, unet_model="", lora_model=""):
         
+        
+        # Debug информация о загрузке
+        print(f"[DEBUG] Load_MVAdapter_T2MV_Pipeline Debug Info:")
+        print(f"[DEBUG] Loading T2MV pipeline with parameters:")
+        print(f"[DEBUG] - Base model: {base_model}")
+        print(f"[DEBUG] - VAE model: {vae_model}")
+        print(f"[DEBUG] - UNet model: {unet_model}")
+        print(f"[DEBUG] - LoRA model: {lora_model}")
+        print(f"[DEBUG] - Adapter path: {adapter_path}")
+        print(f"[DEBUG] - Scheduler: {scheduler}")
+        print(f"[DEBUG] - Num views: {num_views}")
+        print(f"[DEBUG] - Use FP16: {use_fp16}")
+        print(f"[DEBUG] - Use MMGP: {use_mmgp}")
+        print(f"[DEBUG] - Local adapter path: {cls.CKPT_MVADAPTER_PATH}")
+        
         dtype = torch.float16 if use_fp16 else torch.float32
         vae_model = None if vae_model == "None" else vae_model
         unet_model = None if not unet_model else unet_model
         lora_model = None if not lora_model else lora_model
+        
+        print(f"[DEBUG] Processed parameters:")
+        print(f"[DEBUG] - Dtype: {dtype}")
+        print(f"[DEBUG] - VAE model (processed): {vae_model}")
+        print(f"[DEBUG] - UNet model (processed): {unet_model}")
+        print(f"[DEBUG] - LoRA model (processed): {lora_model}")
         
         pipe = mvadapter_prepare_t2mv_pipeline(
             base_model=base_model,
@@ -5000,6 +5054,44 @@ class MVAdapter_Text_To_MultiView:
             num_inference_steps, guidance_scale, height, width, seed, 
             lora_scale=1.0, azimuth_angles="0,45,90,180,270,315"):
         
+        # Debug информация о пайплайне
+        print(f"[DEBUG] MVAdapter T2MV Pipeline Debug Info:")
+        print(f"[DEBUG] Pipeline type: {type(mvadapter_t2mv_pipe)}")
+        
+        # Проверяем атрибуты пайплайна для получения информации о моделях
+        if hasattr(mvadapter_t2mv_pipe, 'unet'):
+            print(f"[DEBUG] UNet model: {type(mvadapter_t2mv_pipe.unet)}")
+            if hasattr(mvadapter_t2mv_pipe.unet, 'config'):
+                print(f"[DEBUG] UNet config: {mvadapter_t2mv_pipe.unet.config}")
+        
+        if hasattr(mvadapter_t2mv_pipe, 'vae'):
+            print(f"[DEBUG] VAE model: {type(mvadapter_t2mv_pipe.vae)}")
+            if hasattr(mvadapter_t2mv_pipe.vae, 'config'):
+                print(f"[DEBUG] VAE config: {mvadapter_t2mv_pipe.vae.config}")
+        
+        if hasattr(mvadapter_t2mv_pipe, 'text_encoder'):
+            print(f"[DEBUG] Text encoder: {type(mvadapter_t2mv_pipe.text_encoder)}")
+        
+        if hasattr(mvadapter_t2mv_pipe, 'tokenizer'):
+            print(f"[DEBUG] Tokenizer: {type(mvadapter_t2mv_pipe.tokenizer)}")
+            
+        # Проверяем пути к моделям
+        for attr_name in ['unet', 'vae', 'text_encoder', 'tokenizer', 'scheduler']:
+            if hasattr(mvadapter_t2mv_pipe, attr_name):
+                attr = getattr(mvadapter_t2mv_pipe, attr_name)
+                if hasattr(attr, '_name_or_path'):
+                    print(f"[DEBUG] {attr_name} path: {attr._name_or_path}")
+                elif hasattr(attr, 'name_or_path'):
+                    print(f"[DEBUG] {attr_name} path: {attr.name_or_path}")
+        
+        print(f"[DEBUG] Generation parameters:")
+        print(f"[DEBUG] - Prompt: {prompt}")
+        print(f"[DEBUG] - Num views: {num_views}")
+        print(f"[DEBUG] - Guidance scale: {guidance_scale}")
+        print(f"[DEBUG] - Steps: {num_inference_steps}")
+        print(f"[DEBUG] - Seed: {seed}")
+        print(f"[DEBUG] - Image size: {height}x{width}")
+        
         # Parse azimuth angles
         try:
             azimuth_deg = [int(x.strip()) for x in azimuth_angles.split(",")]
@@ -5013,7 +5105,10 @@ class MVAdapter_Text_To_MultiView:
             # Fallback to default angles
             azimuth_deg = [0, 45, 90, 180, 270, 315][:num_views]
         
+        print(f"[DEBUG] Azimuth angles: {azimuth_deg}")
+        
         # Execute generation
+        print(f"[DEBUG] Starting T2MV pipeline execution...")
         images = mvadapter_run_t2mv_pipeline(
             pipe=mvadapter_t2mv_pipe,
             num_views=num_views,
@@ -5029,6 +5124,8 @@ class MVAdapter_Text_To_MultiView:
             azimuth_deg=azimuth_deg,
         )
         
+        print(f"[DEBUG] Generated {len(images)} images")
+        
         # Create image grid  
         # grid_image = make_image_grid(images, rows=1)
         
@@ -5038,6 +5135,7 @@ class MVAdapter_Text_To_MultiView:
         # print(f"Generated T2MV multiview images: {grid_tensor.shape}")
         # return (grid_tensor,)
         return_images = pils_to_torch_imgs(images, device=DEVICE_STR)
+        print(f"[DEBUG] Final tensor shape: {return_images.shape}")
         return (return_images,)
             
 class Load_MVAdapter_Texture_Pipeline:
@@ -5213,3 +5311,808 @@ class MVAdapter_Texture_Projection:
                 os.remove(temp_grid_path)
             raise e
             
+
+from Hunyuan3D_2GP.hy3dgen.shapegen import (
+    Hunyuan3DDiTFlowMatchingPipeline,
+    Hunyuan3DDiTPipeline,
+    FaceReducer,
+    FloaterRemover,
+    DegenerateFaceRemover,
+    MeshSimplifier
+)
+from Hunyuan3D_2GP.hy3dgen.shapegen.pipelines import export_to_trimesh
+from Hunyuan3D_2GP.hy3dgen.texgen import Hunyuan3DPaintPipeline
+from Hunyuan3D_2GP.hy3dgen.rembg import BackgroundRemover
+from Hunyuan3D_2GP.hy3dgen.text2image import HunyuanDiTPipeline
+HUNYUAN3D_AVAILABLE = True
+
+#--- HUN START ---
+class Load_Hunyuan3D_ShapeGen_Pipeline:
+    """Загрузчик пайплайна Hunyuan3D для генерации формы"""
+    CATEGORY = "Comfy3D/Algorithm"
+    RETURN_TYPES = ("HUNYUAN3D_PIPE",)
+    RETURN_NAMES = ("hunyuan3d_pipe",)
+    FUNCTION = "load"
+
+    _REPO_ID_BASE = "tencent"
+
+    _MODES = {
+        "Hunyuan3D-2":             ("Hunyuan3D-2",     "hunyuan3d-dit-v2-0",         30),
+        "Hunyuan3D-2-Fast":        ("Hunyuan3D-2",     "hunyuan3d-dit-v2-0-fast",    20),
+        "Hunyuan3D-2-Turbo":       ("Hunyuan3D-2",     "hunyuan3d-dit-v2-0-turbo",    5),
+        "Hunyuan3D-2mini":         ("Hunyuan3D-2mini", "hunyuan3d-dit-v2-mini",       30),
+        "Hunyuan3D-2mini-Fast":    ("Hunyuan3D-2mini", "hunyuan3d-dit-v2-mini-fast",   20),
+        "Hunyuan3D-2mini-Turbo":   ("Hunyuan3D-2mini", "hunyuan3d-dit-v2-mini-turbo",  5),
+        "Hunyuan3D-2mv":           ("Hunyuan3D-2mv",   "hunyuan3d-dit-v2-mv",   30),
+        "Hunyuan3D-2mv-Fast":      ("Hunyuan3D-2mv",   "hunyuan3d-dit-v2-mv-fast",    20),
+        "Hunyuan3D-2mv-Turbo":     ("Hunyuan3D-2mv",   "hunyuan3d-dit-v2-mv-turbo",   5),
+    }
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "generation_mode": (list(cls._MODES.keys()), {"default": "Hunyuan3D-2-Turbo"}),
+                "weights_format": (["safetensors", "ckpt"], {"default": "safetensors"}),
+                "flash_vdm": ("BOOLEAN", {"default": True}),
+            }
+        }
+
+    @staticmethod
+    def _ensure_weights(repo: str, subfolder: str, use_safetensors: bool):
+        base_dir = os.path.join(CKPT_DIFFUSERS_PATH, f"{Load_Hunyuan3D_ShapeGen_Pipeline._REPO_ID_BASE}/{repo}")
+        ckpt_file = "model.fp16.safetensors" if use_safetensors else "model.fp16.ckpt"
+        ckpt_path = os.path.join(base_dir, subfolder, ckpt_file)
+
+        if not os.path.exists(ckpt_path):
+            print(f"Скачиваем модель: {Load_Hunyuan3D_ShapeGen_Pipeline._REPO_ID_BASE}/{repo}")
+            snapshot_download(
+                repo_id=f"{Load_Hunyuan3D_ShapeGen_Pipeline._REPO_ID_BASE}/{repo}",
+                repo_type="model",
+                local_dir=base_dir,
+                resume_download=True,
+                ignore_patterns=HF_DOWNLOAD_IGNORE
+            )
+
+    @staticmethod
+    def _build_pipe(repo: str, subfolder: str, use_safetensors: bool, flash_vdm: bool):
+        if not HUNYUAN3D_AVAILABLE:
+            raise RuntimeError("Hunyuan3D modules not available")
+
+        Load_Hunyuan3D_ShapeGen_Pipeline._ensure_weights(repo, subfolder, use_safetensors)
+
+        model_dir = os.path.join(CKPT_DIFFUSERS_PATH,
+                                 f"{Load_Hunyuan3D_ShapeGen_Pipeline._REPO_ID_BASE}/{repo}",
+                                 subfolder)
+        ckpt = os.path.join(model_dir, "model.fp16.safetensors" if use_safetensors else "model.fp16.ckpt")
+        cfg = os.path.join(model_dir, "config.yaml")
+
+        print(f"Загружаем пайплайн из:")
+        print(f"  Модель: {ckpt}")
+        print(f"  Конфиг: {cfg}")
+
+        try:
+            pipe = Hunyuan3DDiTFlowMatchingPipeline.from_single_file(
+                ckpt_path=ckpt,
+                config_path=cfg,
+                device="cuda",
+                dtype=torch.float16,
+                use_safetensors=use_safetensors,
+                from_pretrained_kwargs={
+                    "model_path": f"{Load_Hunyuan3D_ShapeGen_Pipeline._REPO_ID_BASE}/{repo}",
+                    "subfolder": subfolder,
+                    "use_safetensors": use_safetensors,
+                },
+            )
+            
+            if pipe is None:
+                raise RuntimeError("from_single_file вернул None")
+            
+            print(f"Пайплайн создан успешно. Тип: {type(pipe)}")
+
+            if flash_vdm and any(tag in subfolder for tag in ("turbo", "fast")):
+                print("Включаем FlashVDM...")
+                try:
+                    pipe.enable_flashvdm(replace_vae=False)
+                    print("FlashVDM включен успешно")
+                except Exception as flash_error:
+                    print(f"Ошибка при включении FlashVDM: {flash_error}")
+                    print("Продолжаем без FlashVDM")
+
+            # Не присваиваем результат .to() так как он может вернуть None
+            pipe.to("cuda", torch.float16)
+            print(f"Пайплайн перенесен на CUDA. Тип: {type(pipe)}")
+            return pipe
+            
+        except Exception as e:
+            print(f"Ошибка в _build_pipe: {e}")
+            import traceback
+            traceback.print_exc()
+            raise e
+
+    def load(self, generation_mode, weights_format, flash_vdm):
+        repo, subfolder, def_steps = self._MODES[generation_mode]
+        use_safe = (weights_format == "safetensors")
+        
+        print(f"Загрузка пайплайна:")
+        print(f"  Режим: {generation_mode}")
+        print(f"  Репозиторий: {repo}")
+        print(f"  Подпапка: {subfolder}")
+        print(f"  Шаги по умолчанию: {def_steps}")
+        print(f"  Использовать safetensors: {use_safe}")
+        print(f"  FlashVDM: {flash_vdm}")
+        
+        try:
+            pipe = self._build_pipe(repo, subfolder, use_safe, flash_vdm)
+            
+            if pipe is None:
+                raise RuntimeError("_build_pipe вернул None")
+            
+            pipe.num_inference_steps = def_steps
+            print(f"Hunyuan3D пайплайн загружен: {generation_mode}")
+            return (pipe,)
+            
+        except Exception as e:
+            print(f"Ошибка при загрузке пайплайна: {e}")
+            import traceback
+            traceback.print_exc()
+            raise e
+
+
+class Load_Hunyuan3D_TexGen_Pipeline:
+    """Загрузчик пайплайна Hunyuan3D для генерации текстур"""
+    CATEGORY = "Comfy3D/Algorithm"
+    RETURN_TYPES = ("HUNYUAN3D_TEXGEN_PIPE",)
+    RETURN_NAMES = ("hunyuan3d_texgen_pipe",)
+    FUNCTION = "load"
+
+    MODEL2REPO = {
+        "Standard": ("tencent/Hunyuan3D-2", "hunyuan3d-paint-v2-0"),
+        "Turbo": ("tencent/Hunyuan3D-2", "hunyuan3d-paint-v2-0-turbo"),
+    }
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "generation_mode": (list(cls.MODEL2REPO.keys()), {"default": "Turbo"}),
+                "enable_cpu_offload": ("BOOLEAN", {"default": False}),
+            }
+        }
+
+    def _download_required_weights(self, repo_id, subfolder):
+        if not HUNYUAN3D_AVAILABLE:
+            raise RuntimeError("Hunyuan3D modules not available")
+
+        ckpt_download_dir = os.path.join(CKPT_DIFFUSERS_PATH, repo_id)
+        os.makedirs(ckpt_download_dir, exist_ok=True)
+
+        # Проверяем нужны ли скачивания
+        delight_dir = os.path.join(ckpt_download_dir, "hunyuan3d-delight-v2-0")
+        subfolder_dir = os.path.join(ckpt_download_dir, subfolder)
+        
+        if not os.path.exists(delight_dir) or not os.path.exists(subfolder_dir):
+            print(f"Скачиваем TexGen модель: {repo_id}")
+            # Only download the "delight" and target submodel directories
+            snapshot_download(
+                repo_id=repo_id,
+                local_dir=ckpt_download_dir,
+                repo_type="model",
+                force_download=False,
+                ignore_patterns=HF_DOWNLOAD_IGNORE
+            )
+
+    def load(self, generation_mode, enable_cpu_offload):
+        repo_id, subfolder = self.MODEL2REPO[generation_mode]
+
+        self._download_required_weights(repo_id, subfolder)
+
+        local_repo_dir = os.path.join(CKPT_DIFFUSERS_PATH, repo_id)
+
+        print(f"Загружаем TexGen пайплайн:")
+        print(f"  Режим: {generation_mode}")
+        print(f"  Репозиторий: {repo_id}")
+        print(f"  Подпапка: {subfolder}")
+        print(f"  Локальная директория: {local_repo_dir}")
+
+        # Используем именованные параметры как в рабочем коде
+        pipe = Hunyuan3DPaintPipeline.from_pretrained(
+            model_path=local_repo_dir
+        )
+
+        # Включаем CPU offload если нужно
+        if enable_cpu_offload:
+            pipe.enable_model_cpu_offload(device="cuda")
+
+        print("Hunyuan3D TexGen пайплайн успешно загружен")
+        return (pipe,)
+
+
+class Load_Hunyuan3D_Text2Image_Pipeline:
+    """Загрузчик пайплайна Hunyuan3D для генерации изображений из текста"""
+    CATEGORY = "Comfy3D/Algorithm"
+    RETURN_TYPES = ("HUNYUAN3D_T2I_PIPE",)
+    RETURN_NAMES = ("hunyuan3d_t2i_pipe",)
+    FUNCTION = "load"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model_path": ("STRING", {"default": "Tencent-Hunyuan/HunyuanDiT-v1.1-Diffusers-Distilled"}),
+                "device": (["cuda", "cpu", "auto"], {"default": "auto"}),
+                "compile_model": ("BOOLEAN", {"default": False}),
+            }
+        }
+
+    @classmethod
+    def load(cls, model_path, device, compile_model):
+        
+        if not HUNYUAN3D_AVAILABLE:
+            raise RuntimeError("Hunyuan3D modules not available")
+        
+        # Определяем устройство
+        if device == "auto":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+        print(f"Загрузка Hunyuan3D Text2Image пайплайна:")
+        print(f"  Модель: {model_path}")
+        print(f"  Устройство: {device}")
+        
+        pipe = HunyuanDiTPipeline(model_path=model_path, device=device)
+        
+        if compile_model and device == "cuda":
+            pipe.compile()
+        
+        print("Hunyuan3D Text2Image пайплайн успешно загружен")
+        return (pipe,)
+
+
+class Hunyuan3D_BackgroundRemover:
+    """Удаление фона с изображения с помощью Hunyuan3D"""
+    CATEGORY = "Comfy3D/Algorithm"
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image_no_bg",)
+    FUNCTION = "remove_background"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+            }
+        }
+
+    def remove_background(self, image):
+        
+        if not HUNYUAN3D_AVAILABLE:
+            raise RuntimeError("Hunyuan3D modules not available")
+        
+        # Преобразование torch tensor в PIL изображение
+        if isinstance(image, torch.Tensor):
+            pil_images = torch_imgs_to_pils(image)
+            input_image = pil_images[0]
+        else:
+            input_image = image
+        
+        # Инициализация инструмента удаления фона
+        rembg = BackgroundRemover()
+        
+        # Удаление фона
+        output_image = rembg(input_image.convert('RGB'))
+        
+        # Преобразование обратно в torch tensor
+        result_tensor = pils_to_torch_imgs([output_image], device=DEVICE_STR)
+        
+        return (result_tensor,)
+
+
+class Hunyuan3D_Text_To_Image:
+    """Генерация изображения из текста с помощью Hunyuan3D"""
+    CATEGORY = "Comfy3D/Algorithm"
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("generated_image",)
+    FUNCTION = "generate"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "hunyuan3d_t2i_pipe": ("HUNYUAN3D_T2I_PIPE",),
+                "prompt": ("STRING", {"default": "красивая девушка в белой студии, 3D стиль, высокое качество", "multiline": True}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+            }
+        }
+
+    def generate(self, hunyuan3d_t2i_pipe, prompt, seed):
+        
+        print(f"Генерация изображения из текста:")
+        print(f"  Промпт: {prompt}")
+        print(f"  Сид: {seed}")
+        
+        # Генерация изображения
+        generated_image = hunyuan3d_t2i_pipe(prompt, seed=seed)
+        
+        # Преобразование в torch tensor
+        result_tensor = pils_to_torch_imgs([generated_image], device=DEVICE_STR)
+        
+        return (result_tensor,)
+
+
+class Hunyuan3D_Image_To_Shape:
+    """Генерация 3D формы из изображения с помощью Hunyuan3D"""
+    CATEGORY = "Comfy3D/Algorithm"
+    RETURN_TYPES = ("MESH", "STRING")
+    RETURN_NAMES = ("mesh", "mesh_path") 
+    FUNCTION = "generate"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "hunyuan3d_pipe": ("HUNYUAN3D_PIPE",),
+                "image": ("IMAGE",),
+                "num_inference_steps": ("INT", {"default": 30, "min": 1, "max": 200}),
+                "guidance_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 20.0, "step": 0.1}),
+                "octree_resolution": ("INT", {"default": 256, "min": 16, "max": 512, "step": 16}),
+                "seed": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff}),
+                "num_chunks": ("INT", {"default": 8000, "min": 1000, "max": 50000}),
+                "box_v": ("FLOAT", {"default": 1.01, "min": 0.5, "max": 2.0, "step": 0.01}),
+            },
+            "optional": {
+                "save_path": ("STRING", {"default": "./output/hunyuan3d_shape.glb"}),
+                "mc_algo": ("STRING", {"default": "dmc"}),
+                "dual_guidance": ("BOOLEAN", {"default": True}),
+                "dual_guidance_scale": ("FLOAT", {"default": 10.5, "min": 0.0, "max": 20.0, "step": 0.1}),
+            }
+        }
+
+    def generate(self, hunyuan3d_pipe, image, num_inference_steps, guidance_scale, 
+                 octree_resolution, seed, num_chunks, box_v, save_path="./output/hunyuan3d_shape.glb",
+                 mc_algo="dmc", dual_guidance=True, dual_guidance_scale=10.5):
+        
+        # Преобразование torch tensor в PIL изображение
+        if isinstance(image, torch.Tensor):
+            pil_images = torch_imgs_to_pils(image)
+            input_image = pil_images[0]
+        else:
+            input_image = image
+        
+        # Получение устройства из пайплайна
+        pipe_device = DEVICE_STR  # Используем глобальное устройство по умолчанию
+        if hasattr(hunyuan3d_pipe, 'device'):
+            pipe_device = hunyuan3d_pipe.device
+        elif hasattr(hunyuan3d_pipe, 'model') and hasattr(hunyuan3d_pipe.model, 'device'):
+            pipe_device = hunyuan3d_pipe.model.device
+        
+        # Установка seed если указан
+        if seed != -1:
+            generator = torch.Generator(device=pipe_device)
+            generator.manual_seed(seed)
+        else:
+            generator = None
+        
+        print(f"Генерация 3D формы из изображения:")
+        print(f"  Шаги инференса: {num_inference_steps}")
+        print(f"  Guidance scale: {guidance_scale}")
+        print(f"  Разрешение октодерева: {octree_resolution}")
+        print(f"  Сид: {seed}")
+        print(f"  Устройство: {pipe_device}")
+        
+        # Генерация 3D меша
+        if hasattr(hunyuan3d_pipe, '__call__'):
+            # Для FlowMatching пайплайна
+            mesh_outputs = hunyuan3d_pipe(
+                image=input_image,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale,
+                generator=generator,
+                octree_resolution=octree_resolution,
+                num_chunks=num_chunks,
+                box_v=box_v,
+                mc_algo=mc_algo,
+                output_type='mesh'
+            )
+        else:
+            raise ValueError("Неподдерживаемый тип пайплайна")
+        
+        # Преобразование в trimesh
+        if isinstance(mesh_outputs, list):
+            trimesh_mesh = export_to_trimesh(mesh_outputs)[0]
+        else:
+            trimesh_mesh = export_to_trimesh([mesh_outputs])[0]
+        
+        # Сохранение меша
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        trimesh_mesh.export(save_path)
+        
+        # Получаем абсолютный путь
+        absolute_save_path = os.path.abspath(save_path)
+        
+        # Создание объекта Mesh для ComfyUI
+        mesh_obj = Mesh(
+            v=trimesh_mesh.vertices,
+            f=trimesh_mesh.faces,
+            device=DEVICE_STR
+        )
+        
+        print(f"3D форма сгенерирована и сохранена: {absolute_save_path}")
+        print(f"  Вершины: {len(trimesh_mesh.vertices)}")
+        print(f"  Грани: {len(trimesh_mesh.faces)}")
+        
+        return (mesh_obj, absolute_save_path)
+
+
+class Hunyuan3D_Mesh_To_Texture:
+    """Генерация текстуры для 3D меша с помощью Hunyuan3D"""
+    CATEGORY = "Comfy3D/Algorithm"
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("textured_mesh_path",)
+    FUNCTION = "generate_texture"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "hunyuan3d_texgen_pipe": ("HUNYUAN3D_TEXGEN_PIPE",),
+                "mesh": ("MESH",),
+                "reference_image": ("IMAGE",),
+                "save_path": ("STRING", {"default": "./output/hunyuan3d_textured.glb"}),
+            }
+        }
+
+    def generate_texture(self, hunyuan3d_texgen_pipe, mesh, reference_image, save_path):
+        
+        # Преобразование изображения
+        if isinstance(reference_image, torch.Tensor):
+            pil_images = torch_imgs_to_pils(reference_image)
+            ref_image = pil_images[0]
+        else:
+            ref_image = reference_image
+        
+        # Преобразование меша в trimesh
+        if hasattr(mesh, 'v') and hasattr(mesh, 'f'):
+            # Mesh объект ComfyUI
+            trimesh_mesh = trimesh.Trimesh(
+                vertices=mesh.v.cpu().numpy() if torch.is_tensor(mesh.v) else mesh.v,
+                faces=mesh.f.cpu().numpy() if torch.is_tensor(mesh.f) else mesh.f
+            )
+        else:
+            trimesh_mesh = mesh
+        
+        print(f"Генерация текстуры для 3D меша:")
+        print(f"  Вершины: {len(trimesh_mesh.vertices)}")
+        print(f"  Грани: {len(trimesh_mesh.faces)}")
+        
+        # Генерация текстуры
+        textured_mesh = hunyuan3d_texgen_pipe(trimesh_mesh, ref_image)
+        
+        # Сохранение текстурированного меша
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        textured_mesh.export(save_path)
+        
+        # Получаем абсолютный путь
+        absolute_save_path = os.path.abspath(save_path)
+        
+        print(f"Текстурированный меш сохранен: {absolute_save_path}")
+        
+        return (absolute_save_path,)
+
+
+class Hunyuan3D_Multiview_Image_To_Shape:
+    """Генерация 3D формы из нескольких видов изображения с помощью Hunyuan3D"""
+    CATEGORY = "Comfy3D/Algorithm"
+    RETURN_TYPES = ("MESH", "STRING")
+    RETURN_NAMES = ("mesh", "mesh_path")
+    FUNCTION = "generate"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "hunyuan3d_pipe": ("HUNYUAN3D_PIPE",),
+                "front_image": ("IMAGE",),
+                "num_inference_steps": ("INT", {"default": 30, "min": 1, "max": 200}),
+                "guidance_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 20.0, "step": 0.1}),
+                "octree_resolution": ("INT", {"default": 256, "min": 16, "max": 512, "step": 16}),
+                "seed": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff}),
+                "num_chunks": ("INT", {"default": 8000, "min": 1000, "max": 50000}),
+                "box_v": ("FLOAT", {"default": 1.01, "min": 0.5, "max": 2.0, "step": 0.01}),
+            },
+            "optional": {
+                "back_image": ("IMAGE",),
+                "left_image": ("IMAGE",),
+                "right_image": ("IMAGE",),
+                "save_path": ("STRING", {"default": "./output/hunyuan3d_multiview_shape.glb"}),
+                "mc_algo": ("STRING", {"default": "dmc"}),
+            }
+        }
+
+    def generate(self, hunyuan3d_pipe, front_image, num_inference_steps, guidance_scale,
+                 octree_resolution, seed, num_chunks, box_v, back_image=None, left_image=None,
+                 right_image=None, save_path="./output/hunyuan3d_multiview_shape.glb", mc_algo="dmc"):
+        
+        # Подготовка изображений для multiview
+        images_dict = {}
+        
+        # Обязательное переднее изображение
+        if isinstance(front_image, torch.Tensor):
+            pil_images = torch_imgs_to_pils(front_image)
+            images_dict['front'] = pil_images[0]
+        else:
+            images_dict['front'] = front_image
+        
+        # Опциональные изображения
+        for key, img in [('back', back_image), ('left', left_image), ('right', right_image)]:
+            if img is not None:
+                if isinstance(img, torch.Tensor):
+                    pil_images = torch_imgs_to_pils(img)
+                    images_dict[key] = pil_images[0]
+                else:
+                    images_dict[key] = img
+        
+        # Получение устройства из пайплайна
+        pipe_device = DEVICE_STR  # Используем глобальное устройство по умолчанию
+        if hasattr(hunyuan3d_pipe, 'device'):
+            pipe_device = hunyuan3d_pipe.device
+        elif hasattr(hunyuan3d_pipe, 'model') and hasattr(hunyuan3d_pipe.model, 'device'):
+            pipe_device = hunyuan3d_pipe.model.device
+        
+        # Установка seed если указан
+        if seed != -1:
+            generator = torch.Generator(device=pipe_device)
+            generator.manual_seed(seed)
+        else:
+            generator = None
+        
+        print(f"Генерация 3D формы из multiview изображений:")
+        print(f"  Доступные виды: {list(images_dict.keys())}")
+        print(f"  Шаги инференса: {num_inference_steps}")
+        print(f"  Guidance scale: {guidance_scale}")
+        print(f"  Устройство: {pipe_device}")
+        
+        # Генерация 3D меша
+        mesh_outputs = hunyuan3d_pipe(
+            image=images_dict,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+            generator=generator,
+            octree_resolution=octree_resolution,
+            num_chunks=num_chunks,
+            box_v=box_v,
+            mc_algo=mc_algo,
+            output_type='mesh'
+        )
+        
+        # Преобразование в trimesh
+        if isinstance(mesh_outputs, list):
+            trimesh_mesh = export_to_trimesh(mesh_outputs)[0]
+        else:
+            trimesh_mesh = export_to_trimesh([mesh_outputs])[0]
+        
+        # Сохранение меша
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        trimesh_mesh.export(save_path)
+        
+        # Получаем абсолютный путь
+        absolute_save_path = os.path.abspath(save_path)
+        
+        # Создание объекта Mesh для ComfyUI
+        mesh_obj = Mesh(
+            v=trimesh_mesh.vertices,
+            f=trimesh_mesh.faces,
+            device=DEVICE_STR
+        )
+        
+        print(f"3D форма сгенерирована и сохранена: {absolute_save_path}")
+        print(f"  Вершины: {len(trimesh_mesh.vertices)}")
+        print(f"  Грани: {len(trimesh_mesh.faces)}")
+        
+        return (mesh_obj, absolute_save_path)
+
+
+class Hunyuan3D_Mesh_Postprocessor:
+    """Постобработка 3D меша с помощью инструментов Hunyuan3D"""
+    CATEGORY = "Comfy3D/Algorithm"
+    RETURN_TYPES = ("MESH", "STRING")
+    RETURN_NAMES = ("processed_mesh", "processed_mesh_path")
+    FUNCTION = "process"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "mesh": ("MESH",),
+                "remove_floaters": ("BOOLEAN", {"default": True}),
+                "remove_degenerate_faces": ("BOOLEAN", {"default": True}),
+                "reduce_faces": ("BOOLEAN", {"default": False}),
+                "simplify_mesh": ("BOOLEAN", {"default": False}),
+            },
+            "optional": {
+                "max_face_count": ("INT", {"default": 40000, "min": 1000, "max": 200000}),
+                "save_path": ("STRING", {"default": "./output/hunyuan3d_processed.glb"}),
+            }
+        }
+
+    def process(self, mesh, remove_floaters, remove_degenerate_faces, reduce_faces, 
+                simplify_mesh, max_face_count=40000, save_path="./output/hunyuan3d_processed.glb"):
+        
+        if not HUNYUAN3D_AVAILABLE:
+            raise RuntimeError("Hunyuan3D modules not available")
+        
+        # Преобразование меша в trimesh
+        if hasattr(mesh, 'v') and hasattr(mesh, 'f'):
+            # Mesh объект ComfyUI
+            trimesh_mesh = trimesh.Trimesh(
+                vertices=mesh.v.cpu().numpy() if torch.is_tensor(mesh.v) else mesh.v,
+                faces=mesh.f.cpu().numpy() if torch.is_tensor(mesh.f) else mesh.f
+            )
+        else:
+            trimesh_mesh = mesh
+        
+        print(f"Постобработка 3D меша:")
+        print(f"  Начальные вершины: {len(trimesh_mesh.vertices)}")
+        print(f"  Начальные грани: {len(trimesh_mesh.faces)}")
+        
+        # Применение постобработчиков
+        if remove_floaters:
+            floater_remover = FloaterRemover()
+            trimesh_mesh = floater_remover(trimesh_mesh)
+            print("  Удалены изолированные компоненты")
+        
+        if remove_degenerate_faces:
+            degenerate_remover = DegenerateFaceRemover()
+            trimesh_mesh = degenerate_remover(trimesh_mesh)
+            print("  Удалены вырожденные грани")
+        
+        if reduce_faces:
+            face_reducer = FaceReducer()
+            trimesh_mesh = face_reducer(trimesh_mesh, max_facenum=max_face_count)
+            print(f"  Уменьшено количество граней до {max_face_count}")
+        
+        if simplify_mesh:
+            mesh_simplifier = MeshSimplifier()
+            trimesh_mesh = mesh_simplifier(trimesh_mesh)
+            print("  Применено упрощение меша")
+        
+        # Сохранение обработанного меша
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        trimesh_mesh.export(save_path)
+        
+        # Получаем абсолютный путь
+        absolute_save_path = os.path.abspath(save_path)
+        
+        # Создание объекта Mesh для ComfyUI
+        processed_mesh_obj = Mesh(
+            v=trimesh_mesh.vertices,
+            f=trimesh_mesh.faces,
+            device=DEVICE_STR
+        )
+        
+        print(f"Обработанный меш сохранен: {absolute_save_path}")
+        print(f"  Финальные вершины: {len(trimesh_mesh.vertices)}")
+        print(f"  Финальные грани: {len(trimesh_mesh.faces)}")
+        
+        return (processed_mesh_obj, absolute_save_path)
+
+
+class Hunyuan3D_Complete_Pipeline:
+    """Полный пайплайн Hunyuan3D: от изображения до текстурированного меша"""
+    CATEGORY = "Comfy3D/Algorithm"
+    RETURN_TYPES = ("MESH", "STRING", "STRING")
+    RETURN_NAMES = ("mesh", "shape_path", "textured_path")
+    FUNCTION = "generate_complete"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "hunyuan3d_pipe": ("HUNYUAN3D_PIPE",),
+                "hunyuan3d_texgen_pipe": ("HUNYUAN3D_TEXGEN_PIPE",),
+                "image": ("IMAGE",),
+                "remove_background": ("BOOLEAN", {"default": True}),
+                "num_inference_steps": ("INT", {"default": 30, "min": 1, "max": 200}),
+                "guidance_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 20.0, "step": 0.1}),
+                "octree_resolution": ("INT", {"default": 256, "min": 16, "max": 512, "step": 16}),
+                "seed": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff}),
+                "postprocess": ("BOOLEAN", {"default": True}),
+            },
+            "optional": {
+                "save_dir": ("STRING", {"default": "./output"}),
+                "filename_base": ("STRING", {"default": "hunyuan3d_complete"}),
+            }
+        }
+
+    def generate_complete(self, hunyuan3d_pipe, hunyuan3d_texgen_pipe, image, remove_background,
+                         num_inference_steps, guidance_scale, octree_resolution, seed, postprocess,
+                         save_dir="./output", filename_base="hunyuan3d_complete"):
+        
+        if not HUNYUAN3D_AVAILABLE:
+            raise RuntimeError("Hunyuan3D modules not available")
+        
+        # Преобразование torch tensor в PIL изображение
+        if isinstance(image, torch.Tensor):
+            pil_images = torch_imgs_to_pils(image)
+            input_image = pil_images[0]
+        else:
+            input_image = image
+        
+        # Удаление фона если необходимо
+        if remove_background:
+            rembg = BackgroundRemover()
+            if input_image.mode == 'RGB':
+                input_image = rembg(input_image)
+            print("Фон удален")
+        
+        # Получение устройства из пайплайна
+        pipe_device = DEVICE_STR  # Используем глобальное устройство по умолчанию
+        if hasattr(hunyuan3d_pipe, 'device'):
+            pipe_device = hunyuan3d_pipe.device
+        elif hasattr(hunyuan3d_pipe, 'model') and hasattr(hunyuan3d_pipe.model, 'device'):
+            pipe_device = hunyuan3d_pipe.model.device
+        
+        # Установка seed если указан
+        if seed != -1:
+            generator = torch.Generator(device=pipe_device)
+            generator.manual_seed(seed)
+        else:
+            generator = None
+        
+        print(f"Запуск полного пайплайна Hunyuan3D:")
+        print(f"  Удаление фона: {remove_background}")
+        print(f"  Постобработка: {postprocess}")
+        print(f"  Устройство: {pipe_device}")
+        
+        # Генерация 3D формы
+        print("Этап 1: Генерация 3D формы...")
+        mesh_outputs = hunyuan3d_pipe(
+            image=input_image,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+            generator=generator,
+            octree_resolution=octree_resolution,
+            output_type='mesh'
+        )
+        
+        # Преобразование в trimesh
+        if isinstance(mesh_outputs, list):
+            trimesh_mesh = export_to_trimesh(mesh_outputs)[0]
+        else:
+            trimesh_mesh = export_to_trimesh([mesh_outputs])[0]
+        
+        # Постобработка если включена
+        if postprocess:
+            print("Этап 2: Постобработка меша...")
+            face_reducer = FaceReducer()
+            trimesh_mesh = face_reducer(trimesh_mesh)
+        
+        # Сохранение формы
+        os.makedirs(save_dir, exist_ok=True)
+        shape_path = os.path.join(save_dir, f"{filename_base}_shape.glb")
+        trimesh_mesh.export(shape_path)
+        # Получаем абсолютный путь для формы
+        absolute_shape_path = os.path.abspath(shape_path)
+        print(f"3D форма сохранена: {absolute_shape_path}")
+        
+        # Генерация текстуры
+        print("Этап 3: Генерация текстуры...")
+        textured_mesh = hunyuan3d_texgen_pipe(trimesh_mesh, input_image)
+        
+        # Сохранение текстурированного меша
+        textured_path = os.path.join(save_dir, f"{filename_base}_textured.glb")
+        textured_mesh.export(textured_path)
+        # Получаем абсолютный путь для текстуры
+        absolute_textured_path = os.path.abspath(textured_path)
+        print(f"Текстурированный меш сохранен: {absolute_textured_path}")
+        
+        # Создание объекта Mesh для ComfyUI
+        mesh_obj = Mesh(
+            v=textured_mesh.vertices,
+            f=textured_mesh.faces,
+            device=DEVICE_STR
+        )
+        
+        print("Полный пайплайн Hunyuan3D завершен успешно!")
+        
+        return (mesh_obj, absolute_shape_path, absolute_textured_path)
+

@@ -1,0 +1,44 @@
+gradio_litmodel3d
+ninja
+pybind11
+
+diffusers
+einops
+opencv-python
+numpy
+torch
+transformers==4.49.0
+torchvision
+#taming-transformers-rom1504
+#ConfigArgParse
+#ipdb
+omegaconf
+diso
+#sentencepiece
+tqdm
+
+# Mesh Processing
+trimesh
+pymeshlab
+pygltflib
+xatlas
+#kornia
+#facexlib
+
+# Training
+accelerate
+#pytorch_lightning
+#scikit-learn
+#scikit-image
+
+# Demo only
+gradio
+uvicorn
+fastapi
+mmgp==3.2.7
+uvicorn
+rembg
+onnxruntime
+#gevent
+#geventhttpclient
+pydantic==2.10.6
