@@ -41,13 +41,21 @@ def get_pytorch_version():
 
 def get_cuda_version():
     # Output: e.g. "cu121" or cu118
-    result = subprocess.run(["nvcc", "--version"], text=True, capture_output=True)
-    if result.returncode == 0:
-        for cuda_version in build_config.supported_cuda_versions:
-            if "cuda_" + cuda_version in result.stdout:
-                return "cu" + cuda_version.replace(".", "")
+    try:
+        result = subprocess.run(["nvcc", "--version"], text=True, capture_output=True)
+        if result.returncode == 0:
+            for cuda_version in build_config.supported_cuda_versions:
+                if "cuda_" + cuda_version in result.stdout:
+                    return "cu" + cuda_version.replace(".", "")
         
-    raise RuntimeError(f"Please install/reinstall CUDA tookit with any of the following supported version: {build_config.supported_cuda_versions}")
+        # If nvcc command succeeded but no supported CUDA version found, use default
+        print(f"Warning: No supported CUDA version detected, using default version: {build_config.cuda_version}")
+        return "cu" + build_config.cuda_version.replace(".", "")
+        
+    except Exception as e:
+        # If nvcc command failed or any other error occurred, use default version from config
+        print(f"Warning: Could not detect CUDA version ({e}), using default version: {build_config.cuda_version}")
+        return "cu" + build_config.cuda_version.replace(".", "")
 
 OS_TYPE = get_os_type()
 PYTHON_VERSION = get_python_version()
