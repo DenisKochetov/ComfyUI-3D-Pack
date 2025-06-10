@@ -53,9 +53,10 @@ def get_cuda_version():
         return "cu" + build_config.cuda_version.replace(".", "")
         
     except Exception as e:
-        # If nvcc command failed or any other error occurred, use default version from config
-        print(f"Warning: Could not detect CUDA version ({e}), using default version: {build_config.cuda_version}")
-        return "cu" + build_config.cuda_version.replace(".", "")
+        # If nvcc command failed or any other error occurred, CUDA is not installed
+        print("CUDA toolkit not found. Please install CUDA 12.8:")
+        print("https://developer.nvidia.com/cuda-12-8-0-download-archive")
+        sys.exit(1)
 
 OS_TYPE = get_os_type()
 PYTHON_VERSION = get_python_version()
@@ -147,12 +148,68 @@ def git_folder_parallel(repo_id: str, folder: str, recursive: bool=True, root_ou
         print(f"Couldn't download folder {folder} from repo {repo_id}", e)
         return False
     
+def is_package_installed(package_name, required_version=None):
+    """Check if a package is installed with the required version"""
+    try:
+        import importlib.metadata
+        installed_version = importlib.metadata.version(package_name)
+        if required_version is None:
+            return True
+        
+        # Handle versions with suffixes like "2.7.1+cu128"
+        installed_base_version = installed_version.split('+')[0]
+        required_base_version = required_version.split('+')[0]
+        
+        # For PyTorch-related packages, we're more flexible with patch versions
+        if package_name in ['torch', 'torchvision', 'xformers']:
+            # Parse version components
+            try:
+                installed_parts = [int(x) for x in installed_base_version.split('.')]
+                required_parts = [int(x) for x in required_base_version.split('.')]
+                
+                # Pad with zeros if needed (e.g., "2.7" vs "2.7.0")
+                max_len = max(len(installed_parts), len(required_parts))
+                installed_parts.extend([0] * (max_len - len(installed_parts)))
+                required_parts.extend([0] * (max_len - len(required_parts)))
+                
+                # Check major.minor compatibility, allow newer patch versions
+                if len(installed_parts) >= 2 and len(required_parts) >= 2:
+                    # Major and minor versions must match
+                    if (installed_parts[0] == required_parts[0] and 
+                        installed_parts[1] == required_parts[1]):
+                        # Patch version can be equal or higher
+                        if len(installed_parts) >= 3 and len(required_parts) >= 3:
+                            return installed_parts[2] >= required_parts[2]
+                        return True
+                return False
+            except ValueError:
+                # If version parsing fails, fall back to exact match
+                return installed_base_version == required_base_version
+        else:
+            # For other packages, require exact version match
+            return installed_base_version == required_base_version
+            
+    except (importlib.metadata.PackageNotFoundError, Exception):
+        return False
+
 def install_remote_packages(package_names):
     for package_name in package_names:
+        original_package_name = package_name
+        required_version = None
+        
         if package_name in build_config.remote_packages:
             package_attr = build_config.remote_packages[package_name]
             if hasattr(package_attr, "version"):
-                package_name += f"=={package_attr.version}"
+                required_version = package_attr.version
+                package_name += f"=={required_version}"
+            
+            # Check if package is already installed with the correct version
+            if is_package_installed(original_package_name, required_version):
+                print(f"Package {original_package_name} (version {required_version or 'any'}) is already installed, skipping...")
+                continue
+            
+            print(f"Installing {original_package_name} version {required_version or 'latest'}...")
+            
             if hasattr(package_attr, "url"):
                 url_option = package_attr.url_option if hasattr(package_attr, "url_option") else "--index-url"
                 
@@ -161,6 +218,13 @@ def install_remote_packages(package_names):
                     package_name, url_option, package_attr.url
                 ])
                 continue
+        else:
+            # Check if package is already installed
+            if is_package_installed(original_package_name):
+                print(f"Package {original_package_name} is already installed, skipping...")
+                continue
+            
+            print(f"Installing {original_package_name}...")
 
         subprocess.run([PYTHON_PATH, "-s", "-m", "pip", "install", package_name])
 
@@ -168,6 +232,14 @@ def install_platform_packages():
     if hasattr(build_config, 'platform_packages') and OS_TYPE in build_config.platform_packages:
         packages = build_config.platform_packages[OS_TYPE]
         for package in packages:
+            # Extract package name (without version constraints)
+            package_name = package.split('==')[0].split('>=')[0].split('<=')[0].split('<')[0].split('>')[0]
+            
+            if is_package_installed(package_name):
+                print(f"Platform package {package_name} is already installed, skipping...")
+                continue
+            
+            print(f"Installing platform package {package}...")
             subprocess.run([PYTHON_PATH, "-s", "-m", "pip", "install", package])
 
 def wheels_dir_exists_and_not_empty(builds_dir):
