@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GLB Sequence Visualizer</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #222; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; }
+        #canvas-container { flex-grow: 1; position: relative; }
+        #controls { padding: 10px; background-color: #333; text-align: center; display: flex; align-items: center; justify-content: center; gap: 10px;}
+        #controls button, #controls input, #controls span { font-size: 14px; padding: 5px 8px; }
+        #frameSlider { flex-grow: 1; max-width: 50%; }
+        #loader {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 1.2em;
+            z-index: 10; /* Ensure it's above the canvas */
+            padding: 10px;
+            background: rgba(0,0,0,0.5);
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container">
+        <div id="visualizer"></div> <!-- This ID is targeted by visualization.js -->
+        <div id="loader" style="display: none;">Loading...</div>
+    </div>
+    <div id="controls">
+        <button id="playPauseBtn">Play</button>
+        <button id="prevFrameBtn">&lt;&lt;</button>
+        <span id="frameInfo">Frame: 0 / 0</span>
+        <input type="range" id="frameSlider" value="0" min="0" max="0" />
+        <button id="nextFrameBtn">&gt;&gt;</button>
+        <span>FPS:</span>
+        <input type="number" id="fpsInput" value="10" min="1" max="60" style="width: 50px;">
+    </div>
+
+    <!-- Import Three.js and GLTFLoader -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.158.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.158.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        let scene, camera, renderer, loader, controls;
+        let currentFrame = 0;
+        let filepaths = [];
+        let glbCache = {}; // Added for preloading
+        let preloadingIndex = 0; // Added for preloading
+        let isPreloading = false; // Added for preloading
+        let animationFrameIdPreload; // Added for cancelling preloading loop
+        let isPlaying = false;
+        let animationFrameId; // Added to declare animationFrameId for play/pause
+        let fps = 10;
+        let lastFrameTime = 0;
+
+        const visualizerElement = document.getElementById('visualizer'); // The one from visualization.js
+        const canvasContainer = document.getElementById('canvas-container');
+        const playPauseBtn = document.getElementById('playPauseBtn');
+        const prevFrameBtn = document.getElementById('prevFrameBtn');
+        const nextFrameBtn = document.getElementById('nextFrameBtn');
+        const frameSlider = document.getElementById('frameSlider');
+        const frameInfo = document.getElementById('frameInfo');
+        const fpsInput = document.getElementById('fpsInput');
+        const loadingIndicator = document.getElementById('loader');
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x404040);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 1.5);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 2.5);
+            directionalLight.position.set(1, 1, 1).normalize();
+            scene.add(directionalLight);
+
+            camera = new THREE.PerspectiveCamera(75, canvasContainer.clientWidth / canvasContainer.clientHeight, 0.1, 1000);
+            camera.position.set(0, 1.5, 3); // Adjust as needed
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            canvasContainer.appendChild(renderer.domElement);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = false;
+            controls.minDistance = 1;
+            controls.maxDistance = 50;
+            controls.target.set(0, 1, 0); // Adjust based on typical model height
+
+            loader = new GLTFLoader();
+
+            window.addEventListener('resize', onWindowResize, false);
+            playPauseBtn.addEventListener('click', togglePlayPause);
+            prevFrameBtn.addEventListener('click', () => changeFrame(currentFrame - 1));
+            nextFrameBtn.addEventListener('click', () => changeFrame(currentFrame + 1));
+            frameSlider.addEventListener('input', () => changeFrame(parseInt(frameSlider.value)));
+            fpsInput.addEventListener('change', () => {
+                fps = parseInt(fpsInput.value) || 10;
+                if (isPlaying) { // Restart loop with new FPS
+                    pauseAnimation();
+                    playAnimation();
+                }
+            });
+            
+            animate();
+        }
+
+        function onWindowResize() {
+            camera.aspect = canvasContainer.clientWidth / canvasContainer.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
+        }
+        
+        function showLoading(show) {
+            loadingIndicator.style.display = show ? 'block' : 'none';
+        }
+
+        function clearSceneModels() {
+            // Clear previous model
+            while(scene.children.length > 0){
+                const object = scene.children.find(child => child.isMesh || child.isGroup || child.isObject3D && !(child.isLight || child.isCamera));
+                if(object){
+                    scene.remove(object);
+                    // Optional: Dispose geometry and material to free GPU memory
+                    if (object.geometry) object.geometry.dispose();
+                    if (object.material) {
+                        if (Array.isArray(object.material)) {
+                            object.material.forEach(m => m.dispose());
+                        } else {
+                            object.material.dispose();
+                        }
+                    }
+                } else {
+                    break; // No more non-essential objects
+                }
+            }
+            // Ensure essential lights are present
+            if (!scene.children.find(c => c.type === "AmbientLight")) {
+                 const ambientLight = new THREE.AmbientLight(0xffffff, 1.5); // Match existing intensity
+                 scene.add(ambientLight);
+            }
+            if (!scene.children.find(c => c.type === "DirectionalLight")) {
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 2.5); // Match existing intensity
+                directionalLight.position.set(1, 1, 1).normalize();
+                scene.add(directionalLight);
+            }
+        }
+
+        async function loadGLB(filepath_param) {
+            clearSceneModels();
+
+            if (!filepath_param) {
+                console.warn("No filepath_param provided to loadGLB");
+                render(); // Render empty scene
+                return;
+            }
+
+            showLoading(true);
+
+            try {
+                if (glbCache[filepath_param]) {
+                    console.log("Loading GLB from cache:", filepath_param);
+                    const model = glbCache[filepath_param].clone(true); // Clone the cached raw scene
+
+                    const box = new THREE.Box3().setFromObject(model);
+                    const center = box.getCenter(new THREE.Vector3());
+                    
+                    // Move the model so its geometric center is at the world origin (0,0,0)
+                    model.position.sub(center); 
+                    scene.add(model);
+                    
+                    controls.target.set(0, 0, 0); // Set orbit controls to target the world origin
+                    controls.update();
+                    console.log("Model loaded from cache and centered:", model);
+                } else {
+                    console.log("GLB not in cache, loading from network:", filepath_param);
+                    await loadFromNetwork_internal(filepath_param); // This will add to scene and set controls.target
+                }
+            } catch (error) {
+                console.error(`Failed to load GLB ${filepath_param}:`, error);
+                if (glbCache[filepath_param]) { // If error happened with a cached item (e.g. cloning failed)
+                     delete glbCache[filepath_param];
+                }
+            } finally {
+                showLoading(false);
+                render();
+            }
+        }
+
+        // Internal function to load from network, process, and add to scene.
+        // Called by loadGLB if item is not in cache.
+        async function loadFromNetwork_internal(filepath_param) {
+            const viewUrl = "/view?" + filepath_param;
+            console.log("Loading GLB (loadFromNetwork_internal):", viewUrl);
+
+            const gltf = await loader.loadAsync(viewUrl); // Can throw, caught by loadGLB
+            const model = gltf.scene;
+
+            const box = new THREE.Box3().setFromObject(model);
+            const center = box.getCenter(new THREE.Vector3());
+            
+            // Move the model so its geometric center is at the world origin (0,0,0)
+            model.position.sub(center);
+            scene.add(model);
+            
+            controls.target.set(0, 0, 0); // Set orbit controls to target the world origin
+            controls.update();
+
+            console.log("Model processed by loadFromNetwork_internal:", model);
+            // Caching is handled by the preloader, not here.
+        }
+
+        async function preloadNextGLB() {
+            if (!isPreloading || preloadingIndex >= filepaths.length) {
+                isPreloading = false;
+                console.log("Preloading complete or stopped.");
+                updateFrameInfo(); // Ensure frame info is correct after preloading messages
+                return;
+            }
+
+            const filepath_to_preload = filepaths[preloadingIndex];
+            if (glbCache[filepath_to_preload]) {
+                // Already preloaded or loaded on demand earlier.
+                preloadingIndex++;
+                animationFrameIdPreload = requestAnimationFrame(preloadNextGLB);
+                return;
+            }
+            
+            // Update UI to show preloading status (can be subtle)
+            // console.log(`Preloading frame ${preloadingIndex + 1}/${filepaths.length}: ${filepath_to_preload}`);
+            frameInfo.textContent = `Frame: ${currentFrame + 1} / ${filepaths.length} (Preloading ${preloadingIndex + 1}...)`;
+
+            try {
+                const viewUrl = "/view?" + filepath_to_preload;
+                const gltf = await loader.loadAsync(viewUrl);
+                glbCache[filepath_to_preload] = gltf.scene; // Store the raw scene object
+                console.log(`Successfully preloaded and cached raw scene: ${filepath_to_preload}`);
+            } catch (error) {
+                console.error(`Error preloading GLB ${filepath_to_preload}:`, error);
+                // Don't store in cache if error, allow on-demand loading later.
+            } finally {
+                preloadingIndex++;
+                if (isPreloading) { // Check if preloading wasn't cancelled
+                    animationFrameIdPreload = requestAnimationFrame(preloadNextGLB); // Schedule next preload
+                }
+                // If preloading just finished or was stopped, reset frameInfo text
+                if (preloadingIndex >= filepaths.length || !isPreloading) {
+                     updateFrameInfo();
+                }
+            }
+        }
+
+        function updateFrameInfo() {
+            frameInfo.textContent = `Frame: ${currentFrame + 1} / ${filepaths.length}`;
+            frameSlider.value = currentFrame;
+        }
+
+        function changeFrame(newFrameIndex) {
+            if (!filepaths || filepaths.length === 0) return;
+            
+            currentFrame = Math.max(0, Math.min(filepaths.length - 1, newFrameIndex));
+            updateFrameInfo();
+            loadGLB(filepaths[currentFrame]);
+        }
+
+        function playAnimation() {
+            isPlaying = true;
+            playPauseBtn.textContent = "Pause";
+            loop();
+        }
+
+        function pauseAnimation() {
+            isPlaying = false;
+            playPauseBtn.textContent = "Play";
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+        }
+
+        function togglePlayPause() {
+            if (isPlaying) {
+                pauseAnimation();
+            } else {
+                playAnimation();
+            }
+        }
+        
+        function loop(timestamp) {
+            if (!isPlaying) return;
+
+            animationFrameId = requestAnimationFrame(loop);
+
+            const GOTO_FPS = 1000 / fps; // milliseconds per frame
+            const elapsed = timestamp - lastFrameTime;
+
+            if (elapsed > GOTO_FPS) {
+                lastFrameTime = timestamp - (elapsed % GOTO_FPS);
+                currentFrame++;
+                if (currentFrame >= filepaths.length) {
+                    currentFrame = 0; // Loop
+                }
+                changeFrame(currentFrame);
+            }
+            // render(); // changeFrame calls render
+        }
+
+        function render() {
+            if (!renderer || !scene || !camera) return;
+            renderer.render(scene, camera);
+        }
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update(); // only required if controls.enableDamping or controls.autoRotate are set to true
+            render();
+        }
+
+        // This function will be called by visualization.js
+        window.updateSequenceData = function(params) {
+            console.log("Received params in iframe:", params);
+            // Stop any ongoing animation and preloading from previous sequence
+            pauseAnimation(); 
+            isPreloading = false;
+            if (animationFrameIdPreload) {
+                cancelAnimationFrame(animationFrameIdPreload);
+                animationFrameIdPreload = null;
+            }
+
+            if (params && params.filepaths && Array.isArray(params.filepaths)) {
+                filepaths = params.filepaths;
+                console.log("Updated filepaths:", filepaths);
+                currentFrame = 0; // Reset to first frame
+
+                // Reset cache and preloading state for the new sequence
+                glbCache = {}; 
+                preloadingIndex = 0;
+
+                if (filepaths.length > 0) {
+                    frameSlider.max = filepaths.length - 1;
+                    frameSlider.value = currentFrame;
+                    loadGLB(filepaths[currentFrame]); // Load the first frame immediately
+                    
+                    isPreloading = true; // Enable preloading for the new sequence
+                    preloadNextGLB(); // Start preloading the rest in the background
+                } else {
+                    // No filepaths, clear scene and UI
+                    frameSlider.max = 0;
+                    frameSlider.value = 0;
+                    clearSceneModels();
+                    render();
+                }
+            } else {
+                console.warn("No filepaths received or in incorrect format. Clearing sequence.");
+                filepaths = [];
+                currentFrame = 0;
+                frameSlider.max = 0;
+                frameSlider.value = 0;
+                clearSceneModels();
+                render();
+            }
+            updateFrameInfo(); // Update frame count display
+        };
+        
+        // Also handle attribute for fallback, though postMessage is better.
+        // This is a simple observer for the attribute set by visualization.js as a fallback.
+        const visualizerObserver = new MutationObserver(mutations => {
+            mutations.forEach(mutation => {
+                if (mutation.type === 'attributes' && mutation.attributeName === 'filepaths_json') {
+                    const jsonPaths = visualizerElement.getAttribute('filepaths_json');
+                    if (jsonPaths) {
+                        try {
+                            const paths = JSON.parse(jsonPaths);
+                            window.updateSequenceData({ filepaths: paths }); // Call the main handler
+                        } catch (e) {
+                            console.error("Error parsing filepaths_json:", e);
+                        }
+                    }
+                }
+                 // Also handle single filepath for compatibility with other visualizers if needed
+                if (mutation.type === 'attributes' && mutation.attributeName === 'filepath') {
+                    const singlePath = visualizerElement.getAttribute('filepath');
+                    if(singlePath && (!filepaths || filepaths.length === 0)) { // Only if not already a sequence
+                        console.log("Fallback: received single filepath", singlePath);
+                        window.updateSequenceData({ filepaths: [singlePath] });
+                    }
+                }
+            });
+        });
+
+        visualizerObserver.observe(visualizerElement, { attributes: true });
+
+        init();
+        
+        // For initial load, if data is already set via attribute by the time script runs
+        // (less likely with type=module but good for robustness)
+        const initialJsonPaths = visualizerElement.getAttribute('filepaths_json');
+        if (initialJsonPaths) {
+            try {
+                const paths = JSON.parse(initialJsonPaths);
+                window.updateSequenceData({ filepaths: paths });
+            } catch (e) {
+                console.error("Error parsing initial filepaths_json:", e);
+            }
+        } else {
+            const initialSinglePath = visualizerElement.getAttribute('filepath');
+            if (initialSinglePath) {
+                 console.log("Fallback: received initial single filepath", initialSinglePath);
+                 window.updateSequenceData({ filepaths: [initialSinglePath] });
+            }
+        }
+
+    </script>
+</body>
+</html> 

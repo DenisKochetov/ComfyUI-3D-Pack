@@ -5312,6 +5312,7 @@ class MVAdapter_Texture_Projection:
             raise e
             
 
+#--- HUN gp START ---
 from Hunyuan3D_2GP.hy3dgen.shapegen import (
     Hunyuan3DDiTFlowMatchingPipeline,
     Hunyuan3DDiTPipeline,
@@ -5337,15 +5338,7 @@ class Load_Hunyuan3D_ShapeGen_Pipeline:
     _REPO_ID_BASE = "tencent"
 
     _MODES = {
-        "Hunyuan3D-2":             ("Hunyuan3D-2",     "hunyuan3d-dit-v2-0",         30),
-        "Hunyuan3D-2-Fast":        ("Hunyuan3D-2",     "hunyuan3d-dit-v2-0-fast",    20),
         "Hunyuan3D-2-Turbo":       ("Hunyuan3D-2",     "hunyuan3d-dit-v2-0-turbo",    5),
-        "Hunyuan3D-2mini":         ("Hunyuan3D-2mini", "hunyuan3d-dit-v2-mini",       30),
-        "Hunyuan3D-2mini-Fast":    ("Hunyuan3D-2mini", "hunyuan3d-dit-v2-mini-fast",   20),
-        "Hunyuan3D-2mini-Turbo":   ("Hunyuan3D-2mini", "hunyuan3d-dit-v2-mini-turbo",  5),
-        "Hunyuan3D-2mv":           ("Hunyuan3D-2mv",   "hunyuan3d-dit-v2-mv",   30),
-        "Hunyuan3D-2mv-Fast":      ("Hunyuan3D-2mv",   "hunyuan3d-dit-v2-mv-fast",    20),
-        "Hunyuan3D-2mv-Turbo":     ("Hunyuan3D-2mv",   "hunyuan3d-dit-v2-mv-turbo",   5),
     }
 
     @classmethod
@@ -5361,18 +5354,36 @@ class Load_Hunyuan3D_ShapeGen_Pipeline:
     @staticmethod
     def _ensure_weights(repo: str, subfolder: str, use_safetensors: bool):
         base_dir = os.path.join(CKPT_DIFFUSERS_PATH, f"{Load_Hunyuan3D_ShapeGen_Pipeline._REPO_ID_BASE}/{repo}")
-        ckpt_file = "model.fp16.safetensors" if use_safetensors else "model.fp16.ckpt"
+        
+        # Определяем какой файл искать в зависимости от формата
+        if use_safetensors:
+            ckpt_file = "model.fp16.safetensors"
+        else:
+            ckpt_file = "model.fp16.ckpt"
+            
         ckpt_path = os.path.join(base_dir, subfolder, ckpt_file)
 
         if not os.path.exists(ckpt_path):
             print(f"Скачиваем модель: {Load_Hunyuan3D_ShapeGen_Pipeline._REPO_ID_BASE}/{repo}")
+            print(f"Скачиваем только директорию: {subfolder}")
+            
+            # Определяем паттерны для скачивания в зависимости от формата весов
+            patterns_to_download = [f"{subfolder}/**"]
+            
             snapshot_download(
                 repo_id=f"{Load_Hunyuan3D_ShapeGen_Pipeline._REPO_ID_BASE}/{repo}",
                 repo_type="model",
                 local_dir=base_dir,
                 resume_download=True,
-                ignore_patterns=HF_DOWNLOAD_IGNORE
+                allow_patterns=patterns_to_download,  # Скачиваем только нужную директорию
+                ignore_patterns=HF_DOWNLOAD_IGNORE    # Игнорируем ненужные файлы
             )
+            
+            # Проверяем что файл действительно скачался
+            if not os.path.exists(ckpt_path):
+                raise RuntimeError(f"Файл {ckpt_file} не найден в {subfolder} после скачивания")
+
+        return ckpt_path
 
     @staticmethod
     def _build_pipe(repo: str, subfolder: str, use_safetensors: bool, flash_vdm: bool):
@@ -5467,7 +5478,6 @@ class Load_Hunyuan3D_TexGen_Pipeline:
     FUNCTION = "load"
 
     MODEL2REPO = {
-        "Standard": ("tencent/Hunyuan3D-2", "hunyuan3d-paint-v2-0"),
         "Turbo": ("tencent/Hunyuan3D-2", "hunyuan3d-paint-v2-0-turbo"),
     }
 
@@ -5482,25 +5492,51 @@ class Load_Hunyuan3D_TexGen_Pipeline:
 
     def _download_required_weights(self, repo_id, subfolder):
         if not HUNYUAN3D_AVAILABLE:
-            raise RuntimeError("Hunyuan3D modules not available")
+            raise RuntimeError("Hunyuan3D не доступен. Установите необходимые зависимости.")
 
         ckpt_download_dir = os.path.join(CKPT_DIFFUSERS_PATH, repo_id)
-        os.makedirs(ckpt_download_dir, exist_ok=True)
-
-        # Проверяем нужны ли скачивания
-        delight_dir = os.path.join(ckpt_download_dir, "hunyuan3d-delight-v2-0")
-        subfolder_dir = os.path.join(ckpt_download_dir, subfolder)
         
-        if not os.path.exists(delight_dir) or not os.path.exists(subfolder_dir):
-            print(f"Скачиваем TexGen модель: {repo_id}")
-            # Only download the "delight" and target submodel directories
-            snapshot_download(
-                repo_id=repo_id,
-                local_dir=ckpt_download_dir,
-                repo_type="model",
-                force_download=False,
-                ignore_patterns=HF_DOWNLOAD_IGNORE
-            )
+        # Определяем какие директории нужны для TexGen
+        required_dirs = ["hunyuan3d-delight-v2-0", subfolder]
+        
+        # Проверяем что все директории существуют
+        missing_dirs = []
+        for dir_name in required_dirs:
+            dir_path = os.path.join(ckpt_download_dir, dir_name)
+            if not os.path.exists(dir_path):
+                missing_dirs.append(dir_name)
+        
+        if missing_dirs:
+            try:
+                # Определяем паттерны для скачивания только нужных директорий
+                patterns_to_download = []
+                for dir_name in missing_dirs:
+                    patterns_to_download.append(f"{dir_name}/**")
+                
+                print(f"Скачиваем недостающие директории: {missing_dirs}")
+                snapshot_download(
+                    repo_id=repo_id,
+                    local_dir=ckpt_download_dir,
+                    repo_type="model",
+                    force_download=False,
+                    resume_download=True,
+                    allow_patterns=patterns_to_download,  # Скачиваем только нужные директории
+                    ignore_patterns=HF_DOWNLOAD_IGNORE    # Игнорируем ненужные файлы
+                )
+                
+                print(f"Загрузка завершена для директорий: {missing_dirs}")
+                
+            except Exception as e:
+                print(f"Ошибка при скачивании моделей: {e}")
+                raise RuntimeError(f"Не удалось загрузить модели Hunyuan3D TexGen: {e}")
+        
+        # Проверяем что все ключевые компоненты существуют
+        for dir_name in required_dirs:
+            dir_path = os.path.join(ckpt_download_dir, dir_name)
+            if not os.path.exists(dir_path):
+                raise RuntimeError(f"Директория {dir_name} не найдена после скачивания")
+                
+        return ckpt_download_dir
 
     def load(self, generation_mode, enable_cpu_offload):
         repo_id, subfolder = self.MODEL2REPO[generation_mode]
@@ -5515,17 +5551,38 @@ class Load_Hunyuan3D_TexGen_Pipeline:
         print(f"  Подпапка: {subfolder}")
         print(f"  Локальная директория: {local_repo_dir}")
 
-        # Используем именованные параметры как в рабочем коде
-        pipe = Hunyuan3DPaintPipeline.from_pretrained(
-            model_path=local_repo_dir
-        )
+        # Проверяем что все нужные файлы на месте перед загрузкой
+        delight_dir = os.path.join(local_repo_dir, "hunyuan3d-delight-v2-0")
+        paint_dir = os.path.join(local_repo_dir, subfolder)
+        
+        if not os.path.exists(delight_dir):
+            raise RuntimeError(f"Директория delight не найдена: {delight_dir}")
+        if not os.path.exists(paint_dir):
+            raise RuntimeError(f"Директория paint не найдена: {paint_dir}")
+            
+        # Проверяем наличие text_encoder
+        text_encoder_dir = os.path.join(delight_dir, "text_encoder")
+        if not os.path.exists(text_encoder_dir):
+            raise RuntimeError(f"text_encoder не найден: {text_encoder_dir}")
 
-        # Включаем CPU offload если нужно
-        if enable_cpu_offload:
-            pipe.enable_model_cpu_offload(device="cuda")
+        try:
+            # Создаем пайплайн с правильными параметрами
+            pipe = Hunyuan3DPaintPipeline.from_pretrained(
+                model_path=local_repo_dir
+            )
 
-        print("Hunyuan3D TexGen пайплайн успешно загружен")
-        return (pipe,)
+            # Включаем CPU offload если нужно
+            if enable_cpu_offload:
+                pipe.enable_model_cpu_offload(device="cuda")
+
+            print("Hunyuan3D TexGen пайплайн успешно загружен")
+            return (pipe,)
+        
+        except Exception as e:
+            print(f"Ошибка при создании пайплайна: {e}")
+            print("Попробуйте удалить папку с моделью и скачать заново:")
+            print(f"rm -rf {local_repo_dir}")
+            raise e
 
 
 class Load_Hunyuan3D_Text2Image_Pipeline:
@@ -5651,7 +5708,7 @@ class Hunyuan3D_Image_To_Shape:
         return {
             "required": {
                 "hunyuan3d_pipe": ("HUNYUAN3D_PIPE",),
-                "image": ("IMAGE",),
+                "image": (["IMAGE", "LIST"],),
                 "num_inference_steps": ("INT", {"default": 30, "min": 1, "max": 200}),
                 "guidance_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 20.0, "step": 0.1}),
                 "octree_resolution": ("INT", {"default": 256, "min": 16, "max": 512, "step": 16}),
@@ -5671,8 +5728,11 @@ class Hunyuan3D_Image_To_Shape:
                  octree_resolution, seed, num_chunks, box_v, save_path="./output/hunyuan3d_shape.glb",
                  mc_algo="dmc", dual_guidance=True, dual_guidance_scale=10.5):
         
-        # Преобразование torch tensor в PIL изображение
-        if isinstance(image, torch.Tensor):
+        # Преобразование torch tensor в PIL изображение или получение первого элемента из списка
+        if isinstance(image, list):
+            # Если это список PIL изображений, берем первое
+            input_image = image[0]
+        elif isinstance(image, torch.Tensor):
             pil_images = torch_imgs_to_pils(image)
             input_image = pil_images[0]
         else:
@@ -5756,7 +5816,7 @@ class Hunyuan3D_Mesh_To_Texture:
             "required": {
                 "hunyuan3d_texgen_pipe": ("HUNYUAN3D_TEXGEN_PIPE",),
                 "mesh": ("MESH",),
-                "reference_image": ("IMAGE",),
+                "reference_image": (["IMAGE", "LIST"],),
                 "save_path": ("STRING", {"default": "./output/hunyuan3d_textured.glb"}),
             }
         }
@@ -5764,7 +5824,10 @@ class Hunyuan3D_Mesh_To_Texture:
     def generate_texture(self, hunyuan3d_texgen_pipe, mesh, reference_image, save_path):
         
         # Преобразование изображения
-        if isinstance(reference_image, torch.Tensor):
+        if isinstance(reference_image, list):
+            # Если это список PIL изображений, берем первое
+            ref_image = reference_image[0]
+        elif isinstance(reference_image, torch.Tensor):
             pil_images = torch_imgs_to_pils(reference_image)
             ref_image = pil_images[0]
         else:
@@ -5984,8 +6047,8 @@ class Hunyuan3D_Mesh_Postprocessor:
         
         # Создание объекта Mesh для ComfyUI
         processed_mesh_obj = Mesh(
-            v=trimesh_mesh.vertices,
-            f=trimesh_mesh.faces,
+            v=torch.from_numpy(trimesh_mesh.vertices).float().to(DEVICE_STR),
+            f=torch.from_numpy(trimesh_mesh.faces).long().to(DEVICE_STR),
             device=DEVICE_STR
         )
         
@@ -6009,7 +6072,7 @@ class Hunyuan3D_Complete_Pipeline:
             "required": {
                 "hunyuan3d_pipe": ("HUNYUAN3D_PIPE",),
                 "hunyuan3d_texgen_pipe": ("HUNYUAN3D_TEXGEN_PIPE",),
-                "image": ("IMAGE",),
+                "image": (["IMAGE", "LIST"],),
                 "remove_background": ("BOOLEAN", {"default": True}),
                 "num_inference_steps": ("INT", {"default": 30, "min": 1, "max": 200}),
                 "guidance_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 20.0, "step": 0.1}),
@@ -6030,8 +6093,11 @@ class Hunyuan3D_Complete_Pipeline:
         if not HUNYUAN3D_AVAILABLE:
             raise RuntimeError("Hunyuan3D modules not available")
         
-        # Преобразование torch tensor в PIL изображение
-        if isinstance(image, torch.Tensor):
+        # Преобразование torch tensor в PIL изображение или получение первого элемента из списка
+        if isinstance(image, list):
+            # Если это список PIL изображений, берем первое
+            input_image = image[0]
+        elif isinstance(image, torch.Tensor):
             pil_images = torch_imgs_to_pils(image)
             input_image = pil_images[0]
         else:
@@ -6107,8 +6173,8 @@ class Hunyuan3D_Complete_Pipeline:
         
         # Создание объекта Mesh для ComfyUI
         mesh_obj = Mesh(
-            v=textured_mesh.vertices,
-            f=textured_mesh.faces,
+            v=torch.from_numpy(textured_mesh.vertices).float().to(DEVICE_STR),
+            f=torch.from_numpy(textured_mesh.faces).long().to(DEVICE_STR),
             device=DEVICE_STR
         )
         
@@ -6116,3 +6182,275 @@ class Hunyuan3D_Complete_Pipeline:
         
         return (mesh_obj, absolute_shape_path, absolute_textured_path)
 
+class Multi_Background_Remover:
+    """
+    Converts 1 to 4 image inputs (front/back/left/right) to a list of processed PIL images.
+    Applies RGBA conversion and background removal.
+    Suitable for feeding directly into ShapeGen or Paint models.
+    """
+
+    CATEGORY = "Comfy3D/Preprocessors"
+    RETURN_TYPES = ("LIST",)  # List of PIL images
+    RETURN_NAMES = ("images",)
+    FUNCTION = "run"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image_front": ("IMAGE",),
+            },
+            "optional": {
+                "image_back": ("IMAGE",),
+                "image_left": ("IMAGE",),
+            }
+        }
+
+    @torch.no_grad()
+    def run(
+        self,
+        image_front,
+        image_back=None,
+        image_left=None,
+        image_right=None
+    ):
+        rmbg = BackgroundRemover()
+
+        mv_inputs = {
+            k: v for k, v in {
+                "front": image_front,
+                "back": image_back,
+                "left": image_left,
+                "right": image_right
+            }.items() if v is not None
+        }
+
+        images = []
+        for key, tensor_img in mv_inputs.items():
+            pil_img = torch_imgs_to_pils(tensor_img)[0].convert("RGBA")
+            if pil_img.mode == "RGB":
+                pil_img = rmbg(pil_img.convert("RGB"))
+            images.append(pil_img)
+
+        return (images,)
+
+
+class Hunyuan3D_Batch_Folder_Pipeline:
+    """Батч-обработка папки с картинками через полный пайплайн Hunyuan3D"""
+    CATEGORY = "Comfy3D/Algorithm"
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("output_summary",)
+    FUNCTION = "process_folder"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "hunyuan3d_pipe": ("HUNYUAN3D_PIPE",),
+                "hunyuan3d_texgen_pipe": ("HUNYUAN3D_TEXGEN_PIPE",),
+                "input_folder_path": ("STRING", {"forceInput": True}),
+                "output_folder_path": ("STRING", {"forceInput": True}),
+                "use_background_remover": ("BOOLEAN", {"default": True}),
+                "num_inference_steps": ("INT", {"default": 30, "min": 1, "max": 200}),
+                "guidance_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 20.0, "step": 0.1}),
+                "octree_resolution": ("INT", {"default": 256, "min": 16, "max": 512, "step": 16}),
+                "seed": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff}),
+                "postprocess": ("BOOLEAN", {"default": True}),
+            },
+            "optional": {
+                "max_files": ("INT", {"default": -1, "min": -1, "max": 1000}),
+            }
+        }
+
+    def _normalize_filename(self, filename):
+        """Нормализует имя файла, убирая лишние нули"""
+        import re
+        
+        # Извлекаем номер из имени файла
+        match = re.search(r'(\d+)', filename)
+        if match:
+            number = int(match.group(1))
+            return f"frame_{number}"
+        else:
+            # Если номер не найден, используем порядковый номер
+            return filename
+
+    def _get_sorted_image_files(self, folder_path):
+        """Получает отсортированный список PNG файлов"""
+        import glob
+        
+        # Получаем все PNG файлы
+        file_paths = glob.glob(os.path.join(folder_path, "*.png"))
+        
+        # Сортируем по имени файла
+        file_paths.sort()
+        
+        return file_paths
+
+    def _load_image_as_pil(self, image_path):
+        """Загружает PNG изображение как PIL"""
+        from PIL import Image
+        return Image.open(image_path).convert('RGBA')
+    
+    def _process_with_background_remover(self, pil_image):
+        """Обрабатывает изображение через Multi_Background_Remover логику"""
+        if not HUNYUAN3D_AVAILABLE:
+            raise RuntimeError("Hunyuan3D modules not available")
+        
+        # Преобразуем PIL в torch tensor для обработки
+        torch_image = pils_to_torch_imgs([pil_image], device=DEVICE_STR)
+        
+        # Применяем ту же логику что и в Multi_Background_Remover
+        rmbg = BackgroundRemover()
+        processed_pil = torch_imgs_to_pils(torch_image)[0].convert("RGBA")
+        
+        if processed_pil.mode == "RGB":
+            processed_pil = rmbg(processed_pil.convert("RGB"))
+            
+        return processed_pil
+
+    def process_folder(self, hunyuan3d_pipe, hunyuan3d_texgen_pipe, input_folder_path, output_folder_path,
+                      use_background_remover, num_inference_steps, guidance_scale, octree_resolution,
+                      seed, postprocess, max_files=-1):
+        
+        if not HUNYUAN3D_AVAILABLE:
+            raise RuntimeError("Hunyuan3D modules not available")
+        
+        import glob
+        from PIL import Image
+        
+        print(f"Начинаем батч-обработку папки: {input_folder_path}")
+        print(f"Формат файлов: PNG")
+        print(f"Выходная папка: {output_folder_path}")
+        print(f"Использовать Background Remover: {use_background_remover}")
+        
+        # Получаем отсортированный список PNG файлов
+        image_files = self._get_sorted_image_files(input_folder_path)
+        
+        if not image_files:
+            raise RuntimeError(f"Не найдено PNG изображений в папке {input_folder_path}")
+        
+        # Ограничиваем количество файлов если задано
+        if max_files > 0:
+            image_files = image_files[:max_files]
+        
+        print(f"Найдено PNG файлов для обработки: {len(image_files)}")
+        
+        # Создаем выходную папку
+        os.makedirs(output_folder_path, exist_ok=True)
+        
+        # Получение устройства из пайплайна
+        pipe_device = DEVICE_STR
+        if hasattr(hunyuan3d_pipe, 'device'):
+            pipe_device = hunyuan3d_pipe.device
+        elif hasattr(hunyuan3d_pipe, 'model') and hasattr(hunyuan3d_pipe.model, 'device'):
+            pipe_device = hunyuan3d_pipe.model.device
+        
+        processed_count = 0
+        failed_count = 0
+        summary_lines = []
+        
+        for idx, image_path in enumerate(image_files):
+            try:
+                print(f"\n--- Обработка {idx+1}/{len(image_files)}: {os.path.basename(image_path)} ---")
+                
+                # Создаем папку для данного фрейма
+                frame_name = f"frame_{idx}"
+                frame_output_dir = os.path.join(output_folder_path, frame_name)
+                os.makedirs(frame_output_dir, exist_ok=True)
+                
+                # Загружаем изображение
+                input_image = self._load_image_as_pil(image_path)
+                rmbg = BackgroundRemover()
+                
+                # Применяем Background Remover если включен
+                if use_background_remover:
+                    if input_image.mode == 'RGB':
+                        input_image = rmbg(input_image)
+                    print("Фон удален")
+                
+                # Сохраняем обработанное изображение
+                processed_image_path = os.path.join(frame_output_dir, "processed_frame.png")
+                input_image.save(processed_image_path)
+                
+                # Установка seed если указан
+                if seed != -1:
+                    current_seed = seed + idx  # Разный seed для каждого изображения
+                    generator = torch.Generator(device=pipe_device)
+                    generator.manual_seed(current_seed)
+                else:
+                    generator = None
+                
+                print(f"Генерация 3D формы (seed: {current_seed if seed != -1 else 'random'})...")
+                
+                # Генерация 3D формы
+                mesh_outputs = hunyuan3d_pipe(
+                    image=input_image,
+                    num_inference_steps=num_inference_steps,
+                    guidance_scale=guidance_scale,
+                    generator=generator,
+                    octree_resolution=octree_resolution,
+                    output_type='mesh'
+                )
+                
+                # Преобразование в trimesh
+                if isinstance(mesh_outputs, list):
+                    trimesh_mesh = export_to_trimesh(mesh_outputs)[0]
+                else:
+                    trimesh_mesh = export_to_trimesh([mesh_outputs])[0]
+                
+                # Постобработка если включена
+                if postprocess:
+                    print("Постобработка меша...")
+                    face_reducer = FaceReducer()
+                    trimesh_mesh = face_reducer(trimesh_mesh)
+                
+                # Сохранение формы
+                shape_path = os.path.join(frame_output_dir, "shape.glb")
+                trimesh_mesh.export(shape_path)
+                print(f"3D форма сохранена: {shape_path}")
+                
+                # Генерация текстуры
+                print("Генерация текстуры...")
+                textured_mesh = hunyuan3d_texgen_pipe(trimesh_mesh, input_image)
+                
+                # Сохранение текстурированного меша
+                textured_path = os.path.join(frame_output_dir, "textured_mesh.glb")
+                textured_mesh.export(textured_path)
+                print(f"Текстурированный меш сохранен: {textured_path}")
+                
+                processed_count += 1
+                summary_lines.append(f"✓ {frame_name}: успешно обработан")
+                
+                print(f"Фрейм {frame_name} обработан успешно!")
+                
+            except Exception as e:
+                failed_count += 1
+                error_msg = f"✗ frame_{idx}: ошибка - {str(e)}"
+                summary_lines.append(error_msg)
+                print(f"Ошибка при обработке {os.path.basename(image_path)}: {e}")
+                continue
+        
+        # Создаем итоговый отчет
+        summary = f"""
+Батч-обработка завершена!
+
+Статистика:
+- Всего файлов: {len(image_files)}
+- Успешно обработано: {processed_count}
+- Ошибок: {failed_count}
+
+Входная папка: {input_folder_path}
+Выходная папка: {output_folder_path}
+
+Детали:
+""" + "\n".join(summary_lines)
+        
+        print(summary)
+        
+        # Сохраняем отчет в файл
+        report_path = os.path.join(output_folder_path, "batch_processing_report.txt")
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write(summary)
+        
+        return (summary,)

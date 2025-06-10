@@ -13,10 +13,22 @@ class Visualizer {
         container.appendChild(this.iframe)
     }
 
-    updateVisual(filepath) {
+    updateVisual(params) {
+        console.log("[Comfy3D][Visualizer.updateVisual] Received params:", JSON.parse(JSON.stringify(params || null)));
         const iframeDocument = this.iframe.contentWindow.document
         const previewScript = iframeDocument.getElementById('visualizer')
-        previewScript.setAttribute("filepath", filepath)
+        
+        if (this.iframe.contentWindow && typeof this.iframe.contentWindow.updateSequenceData === 'function') {
+            this.iframe.contentWindow.updateSequenceData(params);
+        } else {
+            console.warn("iframe.contentWindow.updateSequenceData function not found. Sending params as attributes.");
+            if (params.filepath) {
+                 previewScript.setAttribute("filepath", params.filepath);
+            }
+            if (params.filepaths) {
+                previewScript.setAttribute("filepaths_json", JSON.stringify(params.filepaths));
+            }
+        }
 
         const timestamp = Date.now().toString()
         previewScript.setAttribute("timestamp", timestamp)
@@ -76,7 +88,8 @@ function createVisualizer(node, inputName, typeName, inputData, app) {
     node.addCustomWidget(widget)
 
     node.updateParameters = (params) => {
-        node.visualizer.updateVisual(params.filepath)
+        console.log("[Comfy3D][node.updateParameters] Received params:", JSON.parse(JSON.stringify(params || null)));
+        node.visualizer.updateVisual(params)
     }
 
     // Events for drawing backgound
@@ -117,22 +130,21 @@ function createVisualizer(node, inputName, typeName, inputData, app) {
 }
 
 function registerVisualizer(nodeType, nodeData, nodeClassName, typeName){
+    console.log(`[Comfy3D] Attempting to register: ${nodeData.name}, checking against ${nodeClassName}`);
     if (nodeData.name == nodeClassName) {
-        console.log("[3D Visualizer] Registering node: " + nodeData.name)
+        console.log(`[Comfy3D] [SUCCESS] Registering node: ${nodeData.name} with typeName: ${typeName}`);
 
         const onNodeCreated = nodeType.prototype.onNodeCreated
 
         nodeType.prototype.onNodeCreated = async function() {
+            console.log(`[Comfy3D] onNodeCreated called for: ${this.type}`);
             const r = onNodeCreated
                 ? onNodeCreated.apply(this, arguments)
                 : undefined
 
-            let Preview3DNode = app.graph._nodes.filter(
-                (wi) => wi.type == nodeClassName
-            )
-            let nodeName = `Preview3DNode_${nodeClassName}`
+            let nodeName = `Preview3DNode_${this.type.replace(/\s|\[|\]/g, '')}`;
 
-            console.log(`[Comfy3D] Create: ${nodeName}`)
+            console.log(`[Comfy3D] Creating visualizer for node: ${nodeName}, type: ${this.type}`);
 
             const result = await createVisualizer.apply(this, [this, nodeName, typeName, {}, app])
 
@@ -142,7 +154,9 @@ function registerVisualizer(nodeType, nodeData, nodeClassName, typeName){
         }
 
         nodeType.prototype.onExecuted = async function(message) {
+            console.log("[Comfy3D][nodeType.onExecuted] Received message:", JSON.parse(JSON.stringify(message || null)));
             if (message?.previews) {
+                console.log("[Comfy3D][nodeType.onExecuted] Data to send to updateParameters:", JSON.parse(JSON.stringify(message.previews[0] || null)));
                 this.updateParameters(message.previews[0])
             }
         }
@@ -157,7 +171,9 @@ app.registerExtension({
     },
 
     async beforeRegisterNodeDef(nodeType, nodeData, app) {
+        console.log(`[Comfy3D] beforeRegisterNodeDef: Checking node type: ${nodeData.name} (Display Name might be different)`);
         registerVisualizer(nodeType, nodeData, "[Comfy3D] Preview 3DGS", "gsVisualizer")
         registerVisualizer(nodeType, nodeData, "[Comfy3D] Preview 3DMesh", "threeVisualizer")
+        registerVisualizer(nodeType, nodeData, "GLBSequencePreviewNode", "glbSequenceVisualizer")
     },
 })
