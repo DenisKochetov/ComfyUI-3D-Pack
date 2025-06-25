@@ -112,7 +112,6 @@ try:
     # Install packages that needs specify remote url
     install_remote_packages(build_config.build_base_packages)
     install_platform_packages()
-    install_no_isolation_packages()
     
     # Check and install build tools if needed
     cstr("Checking build tools...").msg.print()
@@ -187,6 +186,9 @@ try:
         cstr("Successfully downloaded required python cpp source files").msg.print()
     else:
         cstr(f"[WARNING] Couldn't download directory {remote_pycpp_dir_name} in remote repository {build_config.repo_id} to {python_root_dir}, some nodes may not work properly!").warning.print()
+    
+    # Install no-isolation packages at the end
+    install_no_isolation_packages()
     
     cstr("Successfully installed Comfy3D! Let's Accelerate!").msg.print()
     
