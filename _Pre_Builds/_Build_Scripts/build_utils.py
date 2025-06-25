@@ -250,15 +250,20 @@ def install_platform_packages():
             print(f"Installing platform package {package}...")
             subprocess.run([PYTHON_PATH, "-s", "-m", "pip", "install", package])
 
+def is_spconv_working():
+    """Check if spconv is already installed and working"""
+    try:
+        import spconv.core_cc
+        return True
+    except ImportError:
+        return False
+
 def install_spconv():
     """Simple spconv installation with correct CUDA version"""
     # Check if spconv is already installed and working
-    try:
-        import spconv.core_cc
+    if is_spconv_working():
         print("spconv is already installed and working")
         return True
-    except ImportError:
-        pass
     
     # Get CUDA version mapping
     if not hasattr(build_config, 'spconv_cuda_mapping'):

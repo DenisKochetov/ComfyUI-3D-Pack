@@ -16,6 +16,7 @@ from build_utils import (
     install_remote_packages,
     install_platform_packages,
     build_config,
+    is_spconv_working,
     PYTHON_PATH,
     DEPENDENCIES_FILE_ABS_PATH,
     BUILD_REQUIREMENTS_FILE_ABS_PATH,
@@ -33,6 +34,18 @@ def read_dependencies(file_path):
     #dependencies = []  #ignore libraries for debug
     with open(file_path, "r") as f:
         dependencies += [line.strip() for line in f]
+    
+    # Exclude spconv from wheel building if it's already installed and working
+    if is_spconv_working():
+        print("spconv is already installed and working, excluding from wheel build")
+        # Filter out spconv URL from dependencies
+        original_count = len(dependencies)
+        dependencies = [dep for dep in dependencies if 'spconv' not in dep.lower()]
+        filtered_count = original_count - len(dependencies)
+        if filtered_count > 0:
+            print(f"Filtered out {filtered_count} spconv-related dependencies from wheel build")
+    else:
+        print("spconv not installed or not working, will include in wheel build")
         
     return dependencies
     
@@ -150,6 +163,7 @@ def main(args):
     
     # Read dependencies names from the text file
     dependencies = read_dependencies(DEPENDENCIES_FILE_ABS_PATH)
+    print(f"Total dependencies to process: {len(dependencies)}")
     
     # Build all dependencies and move them to output_root_path
     failed_build = []
