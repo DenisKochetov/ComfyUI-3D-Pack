@@ -250,6 +250,29 @@ def install_platform_packages():
             print(f"Installing platform package {package}...")
             subprocess.run([PYTHON_PATH, "-s", "-m", "pip", "install", package])
 
+def install_no_isolation_packages():
+    """Install packages that bypass build isolation"""
+    if hasattr(build_config, 'no_isolation_packages'):
+        for package_name, package_config in build_config.no_isolation_packages.items():
+            # Check if package is already installed
+            if is_package_installed(package_name):
+                print(f"No-isolation package {package_name} is already installed, skipping...")
+                continue
+                
+            print(f"Installing no-isolation package {package_name} with bypass flags...")
+            
+            # Build command with bypass flags
+            cmd = [PYTHON_PATH, "-m", "pip", "install", package_name]
+            if hasattr(package_config, 'flags') and package_config.flags:
+                cmd.extend(package_config.flags)
+            
+            result = subprocess.run(cmd, text=True, capture_output=True)
+            if result.returncode != 0:
+                print(f"Failed to install {package_name}: {result.stderr}")
+                raise RuntimeError(f"Failed to install no-isolation package {package_name}")
+            else:
+                print(f"Successfully installed {package_name}")
+
 def is_spconv_working():
     """Check if spconv is already installed and working"""
     try:

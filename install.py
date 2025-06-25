@@ -22,6 +22,7 @@ try:
         git_folder_parallel,
         install_remote_packages,
         install_platform_packages,
+        install_no_isolation_packages,
         install_spconv,
         check_spconv_after_wheels,
         wheels_dir_exists_and_not_empty,
@@ -111,6 +112,7 @@ try:
     # Install packages that needs specify remote url
     install_remote_packages(build_config.build_base_packages)
     install_platform_packages()
+    install_no_isolation_packages()
     
     # Check and install build tools if needed
     cstr("Checking build tools...").msg.print()

@@ -56,7 +56,6 @@ libigl
 pyvista
 pymeshfix
 igraph
-diso
 open3d
 
 # configs & extra
