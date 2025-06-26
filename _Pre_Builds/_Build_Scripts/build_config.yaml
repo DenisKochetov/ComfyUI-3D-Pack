@@ -17,7 +17,7 @@ build_base_packages: ["torch", "torchvision", "xformers"]
 
 # Packages that require bypassing build isolation
 no_isolation_packages:
-  "diso":
+  "git+https://github.com/DenisKochetov/diso.git#egg=diso":
     flags: ["--no-build-isolation", "--no-cache-dir", --no-binary=:all:, --force-reinstall]
 
 # Platform-specific packages
