@@ -188,7 +188,7 @@ try:
         cstr(f"[WARNING] Couldn't download directory {remote_pycpp_dir_name} in remote repository {build_config.repo_id} to {python_root_dir}, some nodes may not work properly!").warning.print()
     
     # Install no-isolation packages at the end
-    install_no_isolation_packages()
+    # install_no_isolation_packages()
     
     cstr("Successfully installed Comfy3D! Let's Accelerate!").msg.print()
     
