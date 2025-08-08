@@ -128,7 +128,8 @@ from Gen_3D_Modules.PartCrafter.partcrafter_src.pipelines.pipeline_partcrafter i
 from Gen_3D_Modules.PartCrafter.partcrafter_src.utils.data_utils import get_colored_mesh_composition
 from Gen_3D_Modules.PartCrafter.partcrafter_src.utils.render_utils import explode_mesh
 import zipfile
-
+import subprocess, shutil
+from pathlib import Path
 
 os.environ['SPCONV_ALGO'] = 'native'
 
@@ -5995,7 +5996,6 @@ class PartCrafter_Generate:
         
         return (zip_path, relative_scene_path, processed_image_tensor)
 
-
 class PartCrafter_Generate_Api:
     """PartCrafter Generation - Creates merged GLB 3D scene with colored components"""
     
@@ -6020,16 +6020,46 @@ class PartCrafter_Generate_Api:
                 "use_flash_decoder": ("BOOLEAN", {"default": False}),
                 "remove_background": ("BOOLEAN", {"default": True}),
                 "sampling_version": ("INT", {"default": 1, "min": 1, "max": 2}),
-                "scene_filename": ("STRING", {"default": ""}),
-                "enable_mesh_compression": ("BOOLEAN", {"default": False}),
+                "scene_filename": ("STRING", {"default": ""})
+            },
+            "optional": {
+                "enable_mesh_compression": ("BOOLEAN", {"default": True}),
                 "reduction_ratio": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 1.0, "step": 0.01})
             }
         }
+    
+    def compress_glb_with_draco(
+            self,
+            input_path: str,
+            transcoder: str = "/workspace/ComfyUI/custom_nodes/ComfyUI-3D-Pack/Gen_3D_Modules/draco/build/draco_transcoder",
+            compression_level: int = 6,
+            quant_pos_bits: int = 12,
+    ) -> str:
+        """
+        Compress GLB with Draco
+        """
+        if not (Path(transcoder).is_file() and os.access(transcoder, os.X_OK)):
+            raise FileNotFoundError(f"draco_transcoder not found or not executable at {transcoder}")
+
+        # input_path = Path(input_path)
+        # output_path = input_path.with_name(input_path.stem + "_small.glb")
+        output_path = input_path 
+
+        cmd = [
+            transcoder,
+            "-i", str(input_path),
+            "-o", str(output_path),
+            "-cl", str(compression_level),
+            "-qp", str(quant_pos_bits)
+        ]
+        print("[Draco] run:", " ".join(cmd))
+        subprocess.run(cmd, check=True)
+        return str(output_path)
 
     @torch.no_grad()
     def generate(self, partcrafter_pipe, image, num_parts, seed, num_tokens, num_inference_steps, 
                 guidance_scale, max_num_expanded_coords, use_flash_decoder, remove_background, 
-                sampling_version, scene_filename, enable_mesh_compression, reduction_ratio):
+                sampling_version, scene_filename, enable_mesh_compression=True, reduction_ratio=1.0):
 
         try:
             pil_image = torch_imgs_to_pils(image)[0]
@@ -6091,6 +6121,15 @@ class PartCrafter_Generate_Api:
 
             scene_file_path = os.path.join(scene_output_dir, scene_filename)
             merged_mesh.export(scene_file_path)
+
+            if enable_mesh_compression:
+                try:
+                    scene_file_path = self.compress_glb_with_draco(scene_file_path)
+                    # Обновляем имя файла для возврата сжатого файла
+                    scene_filename = os.path.basename(scene_file_path)
+                    print("Draco compression successful")
+                except Exception as err:
+                    print("[PartCrafter] Draco compression failed – using original GLB:", err)
 
             relative_scene_path = f"partcrafter_scenes/{scene_filename}"
             print(f"[PartCrafter] Saved GLB: {relative_scene_path}")
