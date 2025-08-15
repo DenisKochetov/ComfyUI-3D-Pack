@@ -18,6 +18,8 @@ import numpy as np
 
 import torch
 import trimesh
+from mesh_processor.gltf_ops import load_gltf_or_glb, get_all_meshes_triangles
+from .bench_utils import load_glb_mesh
 
 
 def normalize_mesh(mesh, scale=0.9999):
@@ -196,7 +198,10 @@ class SurfaceLoader:
 
         mesh = mesh_or_mesh_path
         if isinstance(mesh, str):
-            mesh = trimesh.load(mesh, force="mesh", merge_primitives=True)
+            if mesh.endswith(".glb") or mesh.endswith(".gltf"):
+                mesh = load_glb_mesh(mesh)
+            else:
+                mesh = trimesh.load(mesh, force="mesh", merge_primitives=True)
         if isinstance(mesh, trimesh.scene.Scene):
             for idx, obj in enumerate(mesh.geometry.values()):
                 if idx == 0:
@@ -222,7 +227,10 @@ class SharpEdgeSurfaceLoader:
 
         mesh = mesh_or_mesh_path
         if isinstance(mesh, str):
-            mesh = trimesh.load(mesh, force="mesh", merge_primitives=True)
+            if mesh.endswith(".glb") or mesh.endswith(".gltf"):
+                mesh = load_glb_mesh(mesh)
+            else:
+                mesh = trimesh.load(mesh, force="mesh", merge_primitives=True)
         if isinstance(mesh, trimesh.scene.Scene):
             for idx, obj in enumerate(mesh.geometry.values()):
                 if idx == 0:

@@ -37,8 +37,8 @@ from plyfile import PlyData
 import trimesh
 from PIL import Image
 
-from .mesh_processer.mesh import Mesh
-from .mesh_processer.mesh_utils import (
+from .mesh_processor.mesh import Mesh
+from .mesh_processor.mesh_utils import (
     ply_to_points_cloud, 
     get_target_axis_and_scale, 
     switch_ply_axis_and_scale, 
@@ -4851,7 +4851,6 @@ class Load_MVAdapter_IG2MV_Pipeline:
         vae_model = None if vae_model == "None" else vae_model
         lora_model = None if not lora_model else lora_model
         
-        # Подготавливаем параметры для пайплайна
         pipeline_kwargs = {
             "base_model": base_model,
             "vae_model": vae_model,

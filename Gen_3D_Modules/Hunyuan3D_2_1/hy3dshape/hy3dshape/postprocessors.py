@@ -22,16 +22,18 @@ import torch
 import trimesh
 
 from .models.autoencoders import Latent2MeshOutput
+from mesh_processor.gltf_ops import load_gltf_or_glb, get_all_meshes_triangles
+from .bench_utils import load_glb_mesh
 from .utils import synchronize_timer
 
 
 def load_mesh(path):
-    if path.endswith(".glb"):
-        mesh = trimesh.load(path)
+    if path.endswith(".glb") or path.endswith(".gltf"):
+        return load_glb_mesh(path)
     else:
         mesh = pymeshlab.MeshSet()
         mesh.load_new_mesh(path)
-    return mesh
+        return mesh
 
 
 def reduce_face(mesh: pymeshlab.MeshSet, max_facenum: int = 200000):
