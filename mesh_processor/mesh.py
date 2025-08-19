@@ -1,7 +1,8 @@
 import os
 import cv2
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 import torch
+from torch import Tensor
 import trimesh
 import numpy as np
 
@@ -10,6 +11,11 @@ from kiui.typing import *
 
 from shared_utils.sh_utils import SH2RGB
 from shared_utils.image_utils import prepare_torch_img
+
+# Импорты для нового загрузчика GLTF
+from .io_gltf import load_gltf_or_glb, get_binary_data
+from .mesh_ops import get_all_meshes_triangles
+from .accessors import access_data
 
 
 class Mesh:
@@ -65,7 +71,7 @@ class Mesh:
         self.ori_scale = 1
 
     @classmethod
-    def load(cls, path, resize=True, renormal=True, retex=False, clean=False, bound=0.5, front_dir='+z', **kwargs):
+    def load(cls, path, resize=True, renormal=True, retex=False, clean=False, bound=0.5, front_dir='+z', use_new_gltf_loader=False, **kwargs):
         """load mesh from path.
 
         Args:
@@ -76,6 +82,7 @@ class Mesh:
             clean (bool, optional): perform mesh cleaning at load (e.g., merge close vertices). Defaults to False.
             bound (float, optional): bound to resize. Defaults to 0.9.
             front_dir (str, optional): front-view direction of the mesh, should be [+-][xyz][ 123]. Defaults to '+z'.
+            use_new_gltf_loader (bool, optional): use new mesh_processor-based GLTF loader instead of trimesh. Defaults to False.
             device (torch.device, optional): torch device. Defaults to None.
         
         Note:
@@ -88,6 +95,9 @@ class Mesh:
         # obj supports face uv
         if path.endswith(".obj"):
             mesh = cls.load_obj(path, **kwargs)
+        # Выбираем загрузчик для GLB/GLTF
+        elif use_new_gltf_loader and (path.endswith(".glb") or path.endswith(".gltf")):
+            mesh = cls.load_gltf(path, **kwargs)
         # trimesh only supports vertex uv, but can load more formats
         else:
             mesh = cls.load_trimesh(path, **kwargs)
@@ -438,6 +448,324 @@ class Mesh:
         )
 
         return mesh
+
+    @classmethod 
+    def from_trimesh(cls, trimesh_obj, device=None, use_new_converter=False):
+        """Создать объект Mesh из trimesh объекта.
+        
+        Args:
+            trimesh_obj: объект trimesh.Trimesh или trimesh.Scene
+            device: torch device
+            use_new_converter: использовать новый конвертер (экспериментально)
+            
+        Returns:
+            Mesh: объект Mesh
+        """
+        if use_new_converter:
+            # Новый способ - пытаемся извлечь данные напрямую без полной зависимости от trimesh
+            return cls._from_trimesh_new(trimesh_obj, device)
+        else:
+            # Старый способ - используем load_trimesh
+            return cls.load_trimesh(given_mesh=trimesh_obj, device=device)
+    
+    @classmethod
+    def _from_trimesh_new(cls, trimesh_obj, device=None):
+        """Экспериментальный конвертер из trimesh (уменьшенная зависимость)"""
+        mesh = cls()
+        
+        if device is None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        mesh.device = device
+        
+        # Обработка Scene vs Trimesh
+        if hasattr(trimesh_obj, 'geometry') and hasattr(trimesh_obj, 'graph'):
+            # Это trimesh.Scene
+            if len(trimesh_obj.geometry) == 0:
+                print("[from_trimesh_new] Scene не содержит геометрии")
+                return None
+            
+            # Берем первую геометрию или объединяем все
+            if len(trimesh_obj.geometry) == 1:
+                _mesh = list(trimesh_obj.geometry.values())[0]
+            else:
+                print(f"[from_trimesh_new] Объединяем {len(trimesh_obj.geometry)} мешей")
+                # Используем стандартный trimesh для объединения (пока что)
+                _mesh = trimesh_obj.dump(concatenate=True)
+        else:
+            # Это обычный Trimesh
+            _mesh = trimesh_obj
+        
+        # Извлекаем базовую геометрию
+        vertices = _mesh.vertices.astype(np.float32)
+        faces = _mesh.faces.astype(np.int32)
+        
+        mesh.v = torch.tensor(vertices, dtype=torch.float32, device=device)
+        mesh.f = torch.tensor(faces, dtype=torch.int32, device=device)
+        
+        # UV координаты
+        try:
+            if hasattr(_mesh, 'visual') and hasattr(_mesh.visual, 'uv') and _mesh.visual.uv is not None:
+                texcoords = _mesh.visual.uv.astype(np.float32)
+                texcoords[:, 1] = 1.0 - texcoords[:, 1]  # Переворачиваем V
+                mesh.vt = torch.tensor(texcoords, dtype=torch.float32, device=device)
+                mesh.ft = mesh.f  # trimesh использует vertex UV
+                print(f"[from_trimesh_new] UV координаты: {texcoords.shape}")
+            else:
+                mesh.vt = None
+                mesh.ft = None
+        except Exception as e:
+            print(f"[from_trimesh_new] Ошибка извлечения UV: {e}")
+            mesh.vt = None
+            mesh.ft = None
+        
+        # Нормали
+        try:
+            if hasattr(_mesh, 'vertex_normals') and _mesh.vertex_normals is not None:
+                normals = _mesh.vertex_normals.astype(np.float32)
+                mesh.vn = torch.tensor(normals, dtype=torch.float32, device=device)
+                mesh.fn = mesh.f
+                print(f"[from_trimesh_new] Нормали: {normals.shape}")
+            else:
+                mesh.vn = None
+                mesh.fn = None
+        except Exception as e:
+            print(f"[from_trimesh_new] Ошибка извлечения нормалей: {e}")
+            mesh.vn = None
+            mesh.fn = None
+        
+        # Цвета вершин
+        try:
+            if hasattr(_mesh, 'visual') and _mesh.visual.kind == 'vertex':
+                vertex_colors = np.array(_mesh.visual.vertex_colors[..., :3]).astype(np.float32) / 255.0
+                mesh.vc = torch.tensor(vertex_colors, dtype=torch.float32, device=device)
+                print(f"[from_trimesh_new] Цвета вершин: {vertex_colors.shape}")
+            else:
+                mesh.vc = None
+        except Exception as e:
+            print(f"[from_trimesh_new] Ошибка извлечения цветов вершин: {e}")
+            mesh.vc = None
+        
+        # Текстуры и материалы
+        should_create_empty_albedo = True
+        try:
+            if (hasattr(_mesh, 'visual') and _mesh.visual.kind == 'texture' and 
+                hasattr(_mesh.visual, 'material')):
+                
+                _material = _mesh.visual.material
+                
+                # PBR Material
+                if hasattr(_material, 'baseColorTexture') and _material.baseColorTexture is not None:
+                    texture = np.array(_material.baseColorTexture).astype(np.float32) / 255.0
+                    if texture.ndim == 3 and texture.shape[2] >= 3:
+                        mesh.albedo = torch.tensor(texture[..., :3], dtype=torch.float32, device=device).contiguous()
+                        should_create_empty_albedo = False
+                        print(f"[from_trimesh_new] Загружена PBR текстура: {texture.shape}")
+                        
+                        # Metallic-Roughness
+                        if hasattr(_material, 'metallicRoughnessTexture') and _material.metallicRoughnessTexture is not None:
+                            mr_texture = np.array(_material.metallicRoughnessTexture).astype(np.float32) / 255.0
+                            mesh.metallicRoughness = torch.tensor(mr_texture, dtype=torch.float32, device=device).contiguous()
+                            print(f"[from_trimesh_new] Загружена metallic-roughness текстура: {mr_texture.shape}")
+                
+                # Simple Material
+                elif hasattr(_material, 'to_pbr'):
+                    pbr_material = _material.to_pbr()
+                    if hasattr(pbr_material, 'baseColorTexture') and pbr_material.baseColorTexture is not None:
+                        texture = np.array(pbr_material.baseColorTexture).astype(np.float32) / 255.0
+                        if texture.ndim == 3 and texture.shape[2] >= 3:
+                            mesh.albedo = torch.tensor(texture[..., :3], dtype=torch.float32, device=device).contiguous()
+                            should_create_empty_albedo = False
+                            print(f"[from_trimesh_new] Загружена простая текстура: {texture.shape}")
+                            
+        except Exception as e:
+            print(f"[from_trimesh_new] Ошибка извлечения текстур: {e}")
+        
+        # Создаем пустую текстуру при необходимости
+        if should_create_empty_albedo:
+            mesh.set_new_albedo(1024, 1024)
+            print(f"[from_trimesh_new] Создана пустая текстура: {mesh.albedo.shape}")
+        
+        print(f"[from_trimesh_new] Конвертирован меш: {vertices.shape[0]} вершин, {faces.shape[0]} граней")
+        return mesh
+
+    @classmethod
+    def load_gltf(cls, path=None, device=None):
+        """Загрузить меш с использованием mesh_processor (новая реализация).
+
+        Альтернатива load_trimesh() для GLB/GLTF файлов без зависимости от trimesh.
+
+        Args:
+            path (str): путь к GLB/GLTF файлу.
+            device (torch.device, optional): torch device. Defaults to None.
+
+        Returns:
+            Mesh: загруженный объект Mesh.
+        """
+        mesh = cls()
+
+        # device
+        if device is None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        mesh.device = device
+
+        if path is None:
+            print(f"[load_gltf] path is required")
+            return None
+
+        try:
+            # Загружаем GLTF документ
+            doc = load_gltf_or_glb(path)
+            print(f"[load_gltf] loaded GLTF document with {len(doc.meshes())} meshes")
+
+            # Извлекаем геометрию всех мешей
+            vertices, faces, mesh_groups = get_all_meshes_triangles(doc, transform_to_global=True)
+            
+            if len(vertices) == 0 or len(faces) == 0:
+                print(f"[load_gltf] no valid geometry found")
+                return None
+
+            print(f"[load_gltf] extracted {len(vertices)} vertices, {len(faces)} faces")
+
+            # Конвертируем в torch тензоры
+            mesh.v = torch.tensor(vertices, dtype=torch.float32, device=device)
+            mesh.f = torch.tensor(faces, dtype=torch.int32, device=device)
+
+            # Пытаемся извлечь UV координаты и нормали из первого меша
+            texcoords = None
+            normals = None
+            vertex_colors = None
+            
+            if doc.meshes():
+                first_mesh = doc.meshes()[0]
+                for primitive in first_mesh.get("primitives", []):
+                    attributes = primitive.get("attributes", {})
+                    
+                    # UV координаты
+                    if "TEXCOORD_0" in attributes and texcoords is None:
+                        try:
+                            texcoord_accessor_idx = int(attributes["TEXCOORD_0"])
+                            texcoords = access_data(doc, texcoord_accessor_idx).astype(np.float32)
+                            # Переворачиваем V координату (как в trimesh)
+                            texcoords[:, 1] = 1.0 - texcoords[:, 1]
+                            print(f"[load_gltf] extracted UV coordinates: {texcoords.shape}")
+                        except Exception as e:
+                            print(f"[load_gltf] failed to extract UV coordinates: {e}")
+                    
+                    # Нормали
+                    if "NORMAL" in attributes and normals is None:
+                        try:
+                            normal_accessor_idx = int(attributes["NORMAL"])
+                            normals = access_data(doc, normal_accessor_idx).astype(np.float32)
+                            print(f"[load_gltf] extracted normals: {normals.shape}")
+                        except Exception as e:
+                            print(f"[load_gltf] failed to extract normals: {e}")
+                    
+                    # Цвета вершин
+                    if "COLOR_0" in attributes and vertex_colors is None:
+                        try:
+                            color_accessor_idx = int(attributes["COLOR_0"])
+                            vertex_colors = access_data(doc, color_accessor_idx).astype(np.float32)
+                            if vertex_colors.shape[1] > 3:
+                                vertex_colors = vertex_colors[:, :3]  # Убираем альфа канал
+                            print(f"[load_gltf] extracted vertex colors: {vertex_colors.shape}")
+                        except Exception as e:
+                            print(f"[load_gltf] failed to extract vertex colors: {e}")
+
+            # Устанавливаем UV координаты
+            mesh.vt = (
+                torch.tensor(texcoords, dtype=torch.float32, device=device)
+                if texcoords is not None
+                else None
+            )
+            mesh.ft = mesh.f if texcoords is not None else None
+
+            # Устанавливаем нормали
+            mesh.vn = (
+                torch.tensor(normals, dtype=torch.float32, device=device)
+                if normals is not None
+                else None
+            )
+            mesh.fn = mesh.f if normals is not None else None
+
+            # Устанавливаем цвета вершин
+            mesh.vc = (
+                torch.tensor(vertex_colors, dtype=torch.float32, device=device)
+                if vertex_colors is not None
+                else None
+            )
+
+            # Пытаемся извлечь текстуры и материалы
+            should_create_empty_albedo = True
+            
+            if doc.materials() and doc.textures() and doc.images():
+                try:
+                    # Берем первый материал
+                    material = doc.materials()[0]
+                    pbr = material.get("pbrMetallicRoughness", {})
+                    
+                    # Основная текстура (albedo)
+                    base_color_texture = pbr.get("baseColorTexture")
+                    if base_color_texture:
+                        texture_idx = base_color_texture.get("index", 0)
+                        if texture_idx < len(doc.textures()):
+                            texture = doc.textures()[texture_idx]
+                            image_idx = texture.get("source", 0)
+                            if image_idx < len(doc.images()):
+                                image_info = doc.images()[image_idx]
+                                
+                                # Извлекаем изображение из буфера
+                                buffer_view_idx = image_info.get("bufferView")
+                                if buffer_view_idx is not None:
+                                    buffer_view = doc.bufferViews()[buffer_view_idx]
+                                    buffer_idx = buffer_view.get("buffer", 0)
+                                    byte_offset = buffer_view.get("byteOffset", 0)
+                                    byte_length = buffer_view.get("byteLength", 0)
+                                    
+                                    binary_data = get_binary_data(doc, buffer_idx)
+                                    image_bytes = binary_data[byte_offset:byte_offset + byte_length]
+                                    
+                                    # Декодируем изображение
+                                    image_array = np.frombuffer(image_bytes, dtype=np.uint8)
+                                    texture_image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+                                    
+                                    if texture_image is not None:
+                                        texture_image = cv2.cvtColor(texture_image, cv2.COLOR_BGR2RGB)
+                                        texture_image = texture_image.astype(np.float32) / 255.0
+                                        mesh.albedo = torch.tensor(texture_image, dtype=torch.float32, device=device).contiguous()
+                                        should_create_empty_albedo = False
+                                        print(f"[load_gltf] loaded albedo texture: {texture_image.shape}")
+                    
+                    # Metallic-Roughness текстура
+                    metallic_roughness_texture = pbr.get("metallicRoughnessTexture")
+                    if metallic_roughness_texture and not should_create_empty_albedo:
+                        texture_idx = metallic_roughness_texture.get("index", 0)
+                        if texture_idx < len(doc.textures()):
+                            # Аналогично для metallic-roughness
+                            # (упрощенная версия для начала)
+                            pass
+                            
+                except Exception as e:
+                    print(f"[load_gltf] failed to extract textures: {e}")
+
+            # Создаем пустую текстуру если не удалось загрузить
+            if should_create_empty_albedo:
+                mesh.set_new_albedo(1024, 1024)
+                print(f"[load_gltf] created empty albedo texture with shape: {mesh.albedo.shape}")
+
+            return mesh
+
+        except Exception as e:
+            print(f"[load_gltf] failed to load {path}: {e}")
+            return None
+
+    @classmethod
+    def load_as_trimesh_like(cls, path, device=None):
+        """Загружает меш и возвращает объект, совместимый с trimesh API"""
+        mesh = cls.load_gltf(path, device=device)
+        if mesh is None:
+            return None
+        return TrimeshLike(mesh)
     
     def set_new_albedo(self, res_H, res_W):
         if self.albedo is None:
@@ -900,6 +1228,598 @@ class Mesh:
         return pcd
         
         
+class TrimeshLike:
+    """Класс, имитирующий интерфейс trimesh.Trimesh, но использующий наш mesh_processor"""
+    
+    def __init__(self, mesh: 'Mesh'):
+        self._mesh = mesh
+        self._cached_vertices = None
+        self._cached_faces = None
+        self._cached_vertex_normals = None
+        self._cached_visual = None
+    
+    @property
+    def vertices(self):
+        """Вершины как numpy array"""
+        if self._cached_vertices is None:
+            if self._mesh.v is not None:
+                self._cached_vertices = self._mesh.v.detach().cpu().numpy()
+            else:
+                self._cached_vertices = np.array([]).reshape(0, 3)
+        return self._cached_vertices
+    
+    @property  
+    def faces(self):
+        """Грани как numpy array"""
+        if self._cached_faces is None:
+            if self._mesh.f is not None:
+                self._cached_faces = self._mesh.f.detach().cpu().numpy()
+            else:
+                self._cached_faces = np.array([]).reshape(0, 3)
+        return self._cached_faces
+    
+    @property
+    def vertex_normals(self):
+        """Нормали вершин как numpy array"""
+        if self._cached_vertex_normals is None:
+            if self._mesh.vn is not None:
+                self._cached_vertex_normals = self._mesh.vn.detach().cpu().numpy()
+            else:
+                # Генерируем нормали если их нет
+                print("[TrimeshLike] Генерируем нормали автоматически")
+                self._mesh.auto_normal()
+                if self._mesh.vn is not None:
+                    self._cached_vertex_normals = self._mesh.vn.detach().cpu().numpy()
+                else:
+                    self._cached_vertex_normals = np.zeros_like(self.vertices)
+        return self._cached_vertex_normals
+    
+    @property
+    def visual(self):
+        """Визуальные свойства (текстуры, материалы)"""
+        if self._cached_visual is None:
+            self._cached_visual = TrimeshLikeVisual(self._mesh)
+        return self._cached_visual
+    
+    def export(self, path):
+        """Экспорт в файл"""
+        return self._mesh.write(path)
+    
+    def apply_transform(self, matrix):
+        """Применение трансформации (возвращает новый объект)"""
+        # Создаем копию
+        new_mesh = Mesh(
+            v=self._mesh.v.clone() if self._mesh.v is not None else None,
+            f=self._mesh.f.clone() if self._mesh.f is not None else None,
+            vn=self._mesh.vn.clone() if self._mesh.vn is not None else None,
+            fn=self._mesh.fn.clone() if self._mesh.fn is not None else None,
+            vt=self._mesh.vt.clone() if self._mesh.vt is not None else None,
+            ft=self._mesh.ft.clone() if self._mesh.ft is not None else None,
+            vc=self._mesh.vc.clone() if self._mesh.vc is not None else None,
+            albedo=self._mesh.albedo.clone() if self._mesh.albedo is not None else None,
+            metallicRoughness=self._mesh.metallicRoughness.clone() if self._mesh.metallicRoughness is not None else None,
+            device=self._mesh.device
+        )
+        
+        # Применяем трансформацию к вершинам
+        if new_mesh.v is not None:
+            matrix_torch = torch.tensor(matrix, dtype=torch.float32, device=new_mesh.device)
+            v_homogeneous = torch.cat([new_mesh.v, torch.ones(new_mesh.v.shape[0], 1, device=new_mesh.device)], dim=1)
+            v_transformed = (matrix_torch @ v_homogeneous.T).T[:, :3]
+            new_mesh.v = v_transformed
+        
+        # Применяем трансформацию к нормалям (только поворот)
+        if new_mesh.vn is not None:
+            rotation_matrix = torch.tensor(matrix[:3, :3], dtype=torch.float32, device=new_mesh.device)
+            new_mesh.vn = (rotation_matrix @ new_mesh.vn.T).T
+        
+        return TrimeshLike(new_mesh)
+    
+    def copy(self):
+        """Создание копии"""
+        return TrimeshLike(self._mesh)
+
+
+class TrimeshLikeVisual:
+    """Имитация trimesh.visual"""
+    
+    def __init__(self, mesh: 'Mesh'):
+        self._mesh = mesh
+        
+    @property
+    def kind(self):
+        """Тип визуализации"""
+        if self._mesh.vc is not None:
+            return 'vertex'
+        elif self._mesh.albedo is not None or self._mesh.vt is not None:
+            return 'texture'
+        else:
+            return 'vertex'
+    
+    @property
+    def vertex_colors(self):
+        """Цвета вершин"""
+        if self._mesh.vc is not None:
+            colors = self._mesh.vc.detach().cpu().numpy()
+            # Добавляем альфа канал
+            alpha = np.ones((colors.shape[0], 1))
+            return (np.concatenate([colors, alpha], axis=1) * 255).astype(np.uint8)
+        else:
+            # Возвращаем белый цвет по умолчанию
+            num_vertices = self._mesh.v.shape[0] if self._mesh.v is not None else 0
+            return np.full((num_vertices, 4), 255, dtype=np.uint8)
+    
+    @property
+    def uv(self):
+        """UV координаты"""
+        if self._mesh.vt is not None:
+            uv = self._mesh.vt.detach().cpu().numpy()
+            # Переворачиваем V обратно (как в trimesh)
+            uv[:, 1] = 1.0 - uv[:, 1]
+            return uv
+        else:
+            return None
+    
+    @property
+    def material(self):
+        """Материал"""
+        return TrimeshLikeMaterial(self._mesh)
+
+
+class TrimeshLikeMaterial:
+    """Имитация trimesh.visual.material"""
+    
+    def __init__(self, mesh: 'Mesh'):
+        self._mesh = mesh
+    
+    @property
+    def baseColorTexture(self):
+        """Основная текстура"""
+        if self._mesh.albedo is not None:
+            texture = self._mesh.albedo.detach().cpu().numpy()
+            return (texture * 255).astype(np.uint8)
+        else:
+            return None
+    
+    @property
+    def metallicRoughnessTexture(self):
+        """Metallic-Roughness текстура"""
+        if self._mesh.metallicRoughness is not None:
+            texture = self._mesh.metallicRoughness.detach().cpu().numpy()
+            return (texture * 255).astype(np.uint8)
+        else:
+            return None
+    
+    def to_pbr(self):
+        """Конвертация в PBR материал"""
+        return self
+
+
+class TrimeshLikeLoader:
+    """Загрузчик, заменяющий trimesh.load()"""
+    
+    @staticmethod
+    def load(path):
+        """Загружает файл и возвращает TrimeshLike объект"""
+        if path.lower().endswith(('.glb', '.gltf')):
+            mesh = Mesh.load_gltf(path)
+            if mesh is not None:
+                return TrimeshLike(mesh)
+            else:
+                raise Exception(f"Failed to load GLB/GLTF: {path}")
+        elif path.lower().endswith('.obj'):
+            mesh = Mesh.load_obj(path)
+            return TrimeshLike(mesh)
+        else:
+            # Fallback к оригинальному trimesh для других форматов
+            import trimesh as original_trimesh
+            return original_trimesh.load(path)
+
+
+class FastMesh:
+    """
+    Быстрая реализация меша на основе FastGLB без зависимости от trimesh.
+    Использует прямую загрузку GLB/GLTF через mesh_processor.
+    """
+    
+    def __init__(
+        self,
+        v: Optional[Tensor] = None,
+        f: Optional[Tensor] = None,
+        vn: Optional[Tensor] = None,
+        fn: Optional[Tensor] = None,
+        vt: Optional[Tensor] = None,
+        ft: Optional[Tensor] = None,
+        vc: Optional[Tensor] = None,
+        albedo: Optional[Tensor] = None,
+        metallicRoughness: Optional[Tensor] = None,
+        device: Optional[torch.device] = None,
+    ):
+        """Инициализация FastMesh с теми же параметрами что и Mesh"""
+        self.device = device if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.v = v
+        self.vn = vn
+        self.vt = vt
+        self.f = f
+        self.fn = fn
+        self.ft = ft
+        self.vc = vc
+        self.albedo = albedo
+        self.metallicRoughness = metallicRoughness
+        self.ori_center = 0
+        self.ori_scale = 1
+    
+    @classmethod
+    def load(cls, path, resize=True, renormal=True, retex=False, clean=False, bound=0.5, front_dir='+z', **kwargs):
+        """Загрузка меша через FastGLB подход"""
+        
+        device = kwargs.get('device')
+        if device is None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        # Определяем тип файла
+        if path.endswith(".obj"):
+            # Для OBJ используем стандартный загрузчик
+            mesh = cls._load_obj_fast(path, device=device, **kwargs)
+        elif path.endswith((".glb", ".gltf")):
+            # Для GLB/GLTF используем наш FastGLB подход
+            mesh = cls._load_gltf_fast(path, device=device, **kwargs)
+        else:
+            # Для других форматов используем стандартный Mesh
+            standard_mesh = Mesh.load(path, resize=False, renormal=False, retex=False, clean=False, **kwargs)
+            mesh = cls._from_standard_mesh(standard_mesh)
+        
+        if mesh is None:
+            return None
+        
+        # Применяем постобработку (аналогично стандартному Mesh.load)
+        if clean:
+            mesh._clean_mesh()
+        
+        print(f"[FastMesh loading] v: {mesh.v.shape}, f: {mesh.f.shape}")
+        
+        if resize:
+            mesh.auto_size(bound=bound)
+        
+        if renormal or mesh.vn is None:
+            mesh.auto_normal()
+            print(f"[FastMesh loading] vn: {mesh.vn.shape}, fn: {mesh.fn.shape}")
+        
+        if retex or (mesh.albedo is not None and mesh.vt is None):
+            mesh.auto_uv(cache_path=path)
+            print(f"[FastMesh loading] vt: {mesh.vt.shape}, ft: {mesh.ft.shape}")
+        
+        # Применяем поворот
+        if front_dir != "+z":
+            mesh._apply_front_dir_rotation(front_dir)
+        
+        return mesh
+    
+    @classmethod
+    def _load_gltf_fast(cls, path, device=None, **kwargs):
+        """Быстрая загрузка GLB/GLTF через mesh_processor"""
+        
+        try:
+            print(f"[FastMesh] Загружаем GLB/GLTF: {path}")
+            
+            # Загружаем GLTF документ
+            from .io_gltf import load_gltf_or_glb, get_binary_data
+            from .mesh_ops import get_all_meshes_triangles
+            from .accessors import access_data
+            
+            doc = load_gltf_or_glb(path)
+            print(f"[FastMesh] GLTF документ: {len(doc.meshes())} мешей")
+            
+            # Извлекаем геометрию
+            vertices, faces, mesh_groups = get_all_meshes_triangles(doc, transform_to_global=True)
+            
+            if len(vertices) == 0 or len(faces) == 0:
+                print(f"[FastMesh] Нет геометрии в {path}")
+                return None
+            
+            mesh = cls(device=device)
+            mesh.v = torch.tensor(vertices, dtype=torch.float32, device=device)
+            mesh.f = torch.tensor(faces, dtype=torch.int32, device=device)
+            
+            # Извлекаем дополнительные данные
+            cls._extract_gltf_attributes(mesh, doc, device)
+            cls._extract_gltf_textures(mesh, doc, device)
+            
+            print(f"[FastMesh] Загружено: {len(vertices)} вершин, {len(faces)} граней")
+            return mesh
+            
+        except Exception as e:
+            print(f"[FastMesh] Ошибка загрузки GLB/GLTF {path}: {e}")
+            return None
+    
+    @classmethod
+    def _extract_gltf_attributes(cls, mesh, doc, device):
+        """Извлекает атрибуты из GLTF (UV, нормали, цвета)"""
+        
+        if not doc.meshes():
+            return
+        
+        first_mesh = doc.meshes()[0]
+        for primitive in first_mesh.get("primitives", []):
+            attributes = primitive.get("attributes", {})
+            
+            # UV координаты
+            if "TEXCOORD_0" in attributes and mesh.vt is None:
+                try:
+                    from .accessors import access_data
+                    uv_accessor_idx = int(attributes["TEXCOORD_0"])
+                    uv_data = access_data(doc, uv_accessor_idx).astype(np.float32)
+                    uv_data[:, 1] = 1.0 - uv_data[:, 1]  # Переворачиваем V
+                    mesh.vt = torch.tensor(uv_data, dtype=torch.float32, device=device)
+                    mesh.ft = mesh.f
+                    print(f"[FastMesh] UV: {mesh.vt.shape}")
+                except Exception as e:
+                    print(f"[FastMesh] Ошибка UV: {e}")
+            
+            # Нормали
+            if "NORMAL" in attributes and mesh.vn is None:
+                try:
+                    from .accessors import access_data
+                    normal_accessor_idx = int(attributes["NORMAL"])
+                    normal_data = access_data(doc, normal_accessor_idx).astype(np.float32)
+                    mesh.vn = torch.tensor(normal_data, dtype=torch.float32, device=device)
+                    mesh.fn = mesh.f
+                    print(f"[FastMesh] Нормали: {mesh.vn.shape}")
+                except Exception as e:
+                    print(f"[FastMesh] Ошибка нормалей: {e}")
+            
+            # Цвета вершин
+            if "COLOR_0" in attributes and mesh.vc is None:
+                try:
+                    from .accessors import access_data
+                    color_accessor_idx = int(attributes["COLOR_0"])
+                    color_data = access_data(doc, color_accessor_idx).astype(np.float32)
+                    if color_data.shape[1] > 3:
+                        color_data = color_data[:, :3]
+                    mesh.vc = torch.tensor(color_data, dtype=torch.float32, device=device)
+                    print(f"[FastMesh] Цвета: {mesh.vc.shape}")
+                except Exception as e:
+                    print(f"[FastMesh] Ошибка цветов: {e}")
+    
+    @classmethod
+    def _extract_gltf_textures(cls, mesh, doc, device):
+        """Извлекает текстуры из GLTF"""
+        
+        should_create_empty = True
+        
+        try:
+            if not (doc.materials() and doc.textures() and doc.images()):
+                mesh._create_empty_albedo()
+                return
+            
+            material = doc.materials()[0]
+            pbr = material.get("pbrMetallicRoughness", {})
+            
+            # Albedo текстура
+            base_color_texture = pbr.get("baseColorTexture")
+            if base_color_texture:
+                albedo_texture = cls._extract_texture_by_index(doc, base_color_texture.get("index", 0))
+                if albedo_texture is not None:
+                    albedo_float = albedo_texture.astype(np.float32) / 255.0
+                    mesh.albedo = torch.tensor(albedo_float, dtype=torch.float32, device=device).contiguous()
+                    should_create_empty = False
+                    print(f"[FastMesh] Albedo: {mesh.albedo.shape}")
+            
+            # Metallic-Roughness текстура
+            mr_texture_info = pbr.get("metallicRoughnessTexture")
+            if mr_texture_info and not should_create_empty:
+                mr_texture = cls._extract_texture_by_index(doc, mr_texture_info.get("index", 0))
+                if mr_texture is not None:
+                    mr_float = mr_texture.astype(np.float32) / 255.0
+                    mesh.metallicRoughness = torch.tensor(mr_float, dtype=torch.float32, device=device).contiguous()
+                    print(f"[FastMesh] MetallicRoughness: {mesh.metallicRoughness.shape}")
+            
+        except Exception as e:
+            print(f"[FastMesh] Ошибка извлечения текстур: {e}")
+        
+        if should_create_empty:
+            mesh._create_empty_albedo()
+    
+    @classmethod
+    def _extract_texture_by_index(cls, doc, texture_idx):
+        """Извлекает текстуру по индексу из GLTF"""
+        
+        try:
+            from .io_gltf import get_binary_data
+            
+            if texture_idx >= len(doc.textures()):
+                return None
+            
+            texture = doc.textures()[texture_idx]
+            image_idx = texture.get("source", 0)
+            
+            if image_idx >= len(doc.images()):
+                return None
+            
+            image_info = doc.images()[image_idx]
+            buffer_view_idx = image_info.get("bufferView")
+            
+            if buffer_view_idx is None:
+                return None
+            
+            buffer_view = doc.bufferViews()[buffer_view_idx]
+            buffer_idx = buffer_view.get("buffer", 0)
+            byte_offset = buffer_view.get("byteOffset", 0)
+            byte_length = buffer_view.get("byteLength", 0)
+            
+            binary_data = get_binary_data(doc, buffer_idx)
+            image_bytes = binary_data[byte_offset:byte_offset + byte_length]
+            
+            # Декодируем изображение
+            image_array = np.frombuffer(image_bytes, dtype=np.uint8)
+            texture_image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+            
+            if texture_image is not None:
+                texture_image = cv2.cvtColor(texture_image, cv2.COLOR_BGR2RGB)
+                return texture_image
+            
+        except Exception as e:
+            print(f"[FastMesh] Ошибка извлечения текстуры {texture_idx}: {e}")
+        
+        return None
+    
+    @classmethod
+    def _load_obj_fast(cls, path, device=None, **kwargs):
+        """Быстрая загрузка OBJ (пока fallback к стандартному методу)"""
+        standard_mesh = Mesh.load_obj(path, device=device, **kwargs)
+        return cls._from_standard_mesh(standard_mesh)
+    
+    @classmethod
+    def _from_standard_mesh(cls, standard_mesh):
+        """Конвертирует стандартный Mesh в FastMesh"""
+        if standard_mesh is None:
+            return None
+        
+        return cls(
+            v=standard_mesh.v,
+            f=standard_mesh.f,
+            vn=standard_mesh.vn,
+            fn=standard_mesh.fn,
+            vt=standard_mesh.vt,
+            ft=standard_mesh.ft,
+            vc=standard_mesh.vc,
+            albedo=standard_mesh.albedo,
+            metallicRoughness=standard_mesh.metallicRoughness,
+            device=standard_mesh.device
+        )
+    
+    def _create_empty_albedo(self):
+        """Создает пустую albedo текстуру"""
+        texture = np.ones((1024, 1024, 3), dtype=np.float32) * np.array([0.5, 0.5, 0.5])
+        self.albedo = torch.tensor(texture, dtype=torch.float32, device=self.device)
+        print(f"[FastMesh] Пустая текстура: {self.albedo.shape}")
+    
+    def _clean_mesh(self):
+        """Очистка меша (упрощенная версия)"""
+        try:
+            from kiui.mesh_utils import clean_mesh
+            vertices = self.v.detach().cpu().numpy()
+            triangles = self.f.detach().cpu().numpy()
+            vertices, triangles = clean_mesh(vertices, triangles, remesh=False)
+            self.v = torch.from_numpy(vertices).contiguous().float().to(self.device)
+            self.f = torch.from_numpy(triangles).contiguous().int().to(self.device)
+        except Exception as e:
+            print(f"[FastMesh] Ошибка очистки: {e}")
+    
+    def _apply_front_dir_rotation(self, front_dir):
+        """Применяет поворот для выравнивания front_dir с +z"""
+        # Используем ту же логику что и в стандартном Mesh
+        if front_dir == "+z":
+            return
+        
+        # Определяем матрицу трансформации
+        if "-z" in front_dir:
+            T = torch.tensor([[1, 0, 0], [0, 1, 0], [0, 0, -1]], device=self.device, dtype=torch.float32)
+        elif "+x" in front_dir:
+            T = torch.tensor([[0, 0, 1], [0, 1, 0], [1, 0, 0]], device=self.device, dtype=torch.float32)
+        elif "-x" in front_dir:
+            T = torch.tensor([[0, 0, -1], [0, 1, 0], [1, 0, 0]], device=self.device, dtype=torch.float32)
+        elif "+y" in front_dir:
+            T = torch.tensor([[1, 0, 0], [0, 0, 1], [0, 1, 0]], device=self.device, dtype=torch.float32)
+        elif "-y" in front_dir:
+            T = torch.tensor([[1, 0, 0], [0, 0, -1], [0, 1, 0]], device=self.device, dtype=torch.float32)
+        else:
+            T = torch.tensor([[1, 0, 0], [0, 1, 0], [0, 0, 1]], device=self.device, dtype=torch.float32)
+        
+        # Дополнительные повороты
+        if '1' in front_dir:
+            T @= torch.tensor([[0, -1, 0], [1, 0, 0], [0, 0, 1]], device=self.device, dtype=torch.float32) 
+        elif '2' in front_dir:
+            T @= torch.tensor([[1, 0, 0], [0, -1, 0], [0, 0, 1]], device=self.device, dtype=torch.float32) 
+        elif '3' in front_dir:
+            T @= torch.tensor([[0, 1, 0], [-1, 0, 0], [0, 0, 1]], device=self.device, dtype=torch.float32) 
+        
+        # Применяем трансформацию
+        if self.v is not None:
+            self.v @= T
+        if self.vn is not None:
+            self.vn @= T
+    
+    # Используем методы из стандартного Mesh
+    def aabb(self):
+        """AABB меша"""
+        return torch.min(self.v, dim=0).values, torch.max(self.v, dim=0).values
+    
+    @torch.no_grad()
+    def auto_size(self, bound=0.9):
+        """Автоматическое изменение размера"""
+        vmin, vmax = self.aabb()
+        self.ori_center = (vmax + vmin) / 2
+        self.ori_scale = 2 * bound / torch.max(vmax - vmin).item()
+        self.v = (self.v - self.ori_center) * self.ori_scale
+    
+    def auto_normal(self):
+        """Автоматический расчет нормалей"""
+        i0, i1, i2 = self.f[:, 0].long(), self.f[:, 1].long(), self.f[:, 2].long()
+        v0, v1, v2 = self.v[i0, :], self.v[i1, :], self.v[i2, :]
+        
+        face_normals = torch.cross(v1 - v0, v2 - v0, dim=-1)
+        
+        vn = torch.zeros_like(self.v)
+        vn.scatter_add_(0, i0[:, None].repeat(1, 3), face_normals)
+        vn.scatter_add_(0, i1[:, None].repeat(1, 3), face_normals)
+        vn.scatter_add_(0, i2[:, None].repeat(1, 3), face_normals)
+        
+        vn = torch.where(
+            dot(vn, vn) > 1e-20,
+            vn,
+            torch.tensor([0.0, 0.0, 1.0], dtype=torch.float32, device=vn.device),
+        )
+        vn = safe_normalize(vn)
+        
+        self.vn = vn
+        self.fn = self.f
+    
+    def auto_uv(self, cache_path=None, vmap=True):
+        """Автоматический расчет UV (используем метод из стандартного Mesh)"""
+        # Временно делегируем стандартному Mesh
+        temp_mesh = Mesh(
+            v=self.v, f=self.f, vn=self.vn, fn=self.fn,
+            vt=self.vt, ft=self.ft, vc=self.vc,
+            albedo=self.albedo, metallicRoughness=self.metallicRoughness,
+            device=self.device
+        )
+        temp_mesh.auto_uv(cache_path=cache_path, vmap=vmap)
+        
+        # Копируем результат обратно
+        self.vt = temp_mesh.vt
+        self.ft = temp_mesh.ft
+        if vmap:
+            self.v = temp_mesh.v
+            self.f = temp_mesh.f
+            self.vn = temp_mesh.vn
+            self.fn = temp_mesh.fn
+            if temp_mesh.vc is not None:
+                self.vc = temp_mesh.vc
+    
+    def to(self, device):
+        """Перенос на другое устройство"""
+        self.device = device
+        for name in ["v", "f", "vn", "fn", "vt", "ft", "albedo", "vc", "metallicRoughness"]:
+            tensor = getattr(self, name)
+            if tensor is not None:
+                setattr(self, name, tensor.to(device))
+        return self
+    
+    def write(self, path):
+        """Сохранение в файл (используем методы стандартного Mesh)"""
+        # Создаем временный стандартный Mesh для сохранения
+        temp_mesh = Mesh(
+            v=self.v, f=self.f, vn=self.vn, fn=self.fn,
+            vt=self.vt, ft=self.ft, vc=self.vc,
+            albedo=self.albedo, metallicRoughness=self.metallicRoughness,
+            device=self.device
+        )
+        temp_mesh.ori_center = self.ori_center
+        temp_mesh.ori_scale = self.ori_scale
+        return temp_mesh.write(path)
+
+
 class PointCloud(NamedTuple):
     points: np.array
     colors: np.array
