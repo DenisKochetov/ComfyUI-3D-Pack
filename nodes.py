@@ -6164,6 +6164,7 @@ class PartCrafter_Generate:
         return (zip_path, relative_scene_path, processed_image_tensor)
 
 # Hunyuan3D-2.1 с FastGLB вместо trimesh
+#------------   hunhunhun ------------
 
 import os
 import gc
@@ -6171,369 +6172,487 @@ import torch
 from mesh_processor import fastglb  # Наша новая библиотека
 
 
-class Hunyuan3D_21_TexGen_FastMesh:
-    """Hunyuan3D-2.1 Texture Generation с FastMesh (без trimesh для GLB)"""
+class Hunyuan3D_21_ShapeGen_Complete:
+    """Hunyuan3D-2.1 Shape Generation - ПОЛНАЯ ВЕРСИЯ с FastMesh"""
     
-    CATEGORY = "Comfy3D/Algorithm/Hunyuan3D-2.1"
-    RETURN_TYPES = ("MESH",)
-    RETURN_NAMES = ("textured_mesh",)
-    FUNCTION = "generate"
-
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "texgen_pipe": ("DIFFUSERS_PIPE",),
-                "mesh_path": ("STRING", {"default": ""}),
+                "shapegen_pipe": ("SHAPEGEN_PIPE",),
                 "image": ("IMAGE",),
-                "create_pbr": ("BOOLEAN", {"default": True}),
-                "use_remesh": ("BOOLEAN", {"default": False}),
-                "use_fastmesh": ("BOOLEAN", {"default": True, "tooltip": "Использовать FastMesh для GLB загрузки"}),
-            }
+                "seed": ("INT", {"default": 42, "min": 0, "max": 0xffffffffffffffff}),
+                "steps": ("INT", {"default": 30, "min": 1, "max": 100}),
+                "guidance_scale": ("FLOAT", {"default": 7.5, "min": 0.1, "max": 30.0, "step": 0.1}),
+                "octree_resolution": ("INT", {"default": 256, "min": 64, "max": 512, "step": 64}),
+                "output_fastmesh": ("BOOLEAN", {"default": True, "tooltip": "Выход FastMesh (иначе стандартный Mesh)"}),
+                "remove_background": ("BOOLEAN", {"default": True}),
+                "auto_cleanup": ("BOOLEAN", {"default": True}),
+            },
         }
-
+    
+    RETURN_TYPES = ("MESH", "IMAGE")
+    RETURN_NAMES = ("mesh", "image")
+    FUNCTION = "generate"
+    CATEGORY = "Comfy3D/Generation/Hunyuan3D"
+    
     @torch.no_grad()
-    def generate(self, texgen_pipe, mesh_path, image, create_pbr, use_remesh, use_fastmesh):
-        if not mesh_path or not os.path.exists(mesh_path):
-            raise Exception(f"Mesh file not found: {mesh_path}")
-
-        pil_image = torch_imgs_to_pils(image)[0]
-        
-        # Save files to output/Hun2-1 directory
-        output_dir = "output/Hun2-1"
-        os.makedirs(output_dir, exist_ok=True)
-        
-        image_path = os.path.join(output_dir, "hunyuan_input.png")
-        output_path = os.path.join(output_dir, "hunyuan_output.obj")
+    def generate(self, shapegen_pipe, image, seed, steps, guidance_scale, octree_resolution, output_fastmesh, remove_background, auto_cleanup):
         
         try:
-            pil_image.save(image_path)
+            # Подготовка изображения
+            pil_image = torch_imgs_to_pils(image)[0]
             
+            # Background removal
+            if remove_background:
+                try:
+                    bg_remover = BackgroundRemover_2_1()
+                    if bg_remover is not None:
+                        pil_image = bg_remover(pil_image)
+                    del bg_remover
+                except Exception as e:
+                    print(f"⚠️ Background removal failed: {e}")
+            
+            # Генерация
+            generator = torch.Generator(device=shapegen_pipe.device).manual_seed(seed)
+            
+            print(f"🚀 Запуск ShapeGen: {steps} шагов, guidance={guidance_scale}")
+            outputs = shapegen_pipe(
+                image=pil_image,
+                num_inference_steps=steps,
+                guidance_scale=guidance_scale,
+                generator=generator,
+                octree_resolution=octree_resolution,
+                num_chunks=200000,
+                output_type='mesh'
+            )
+            
+            # ПРЯМОЙ экспорт из пайплайна в наши объекты!
+            print("🎯 ПРЯМОЙ экспорт из пайплайна (БЕЗ trimesh)...")
+            
+            if output_fastmesh:
+                mesh_objects = export_to_fastmesh(outputs)
+                mesh_out = mesh_objects[0] if isinstance(mesh_objects, list) else mesh_objects
+                print("✅ FastMesh создан напрямую из пайплайна!")
+            else:
+                mesh_objects = export_to_mesh(outputs)
+                mesh_out = mesh_objects[0] if isinstance(mesh_objects, list) else mesh_objects
+                print("✅ Стандартный Mesh создан напрямую из пайплайна!")
+            
+            if mesh_out is None:
+                raise Exception("Не удалось создать mesh из пайплайна")
+            
+            # Face reduction (собственная реализация)
+            try:
+                print("🔧 Применяем face reduction...")
+                mesh_out = self._simple_face_reduction(mesh_out)
+            except Exception as e:
+                print(f"⚠️ Face reduction ошибка: {e}")
+            
+            # Cleanup
+            if auto_cleanup:
+                try:
+                    shapegen_pipe.to('cpu')
+                    torch.cuda.empty_cache()
+                    gc.collect()
+                    print("✅ Cleanup завершен")
+                except Exception as e:
+                    print(f"⚠️ Cleanup ошибка: {e}")
+            
+            processed_image_tensor = pils_to_torch_imgs([pil_image])
+            
+            print(f"✅ ShapeGen завершен: {mesh_out.v.shape[0]} вершин, {mesh_out.f.shape[0]} граней")
+            return (mesh_out, processed_image_tensor)
+            
+        except Exception as e:
+            print(f"❌ ShapeGen ошибка: {e}")
+            return (None, pils_to_torch_imgs([pil_image]) if 'pil_image' in locals() else torch.zeros((1, 3, 512, 512)))
+    
+    def _simple_face_reduction(self, mesh_obj, reduction_factor=0.7):
+        """Простое удаление граней по площади"""
+        try:
+            vertices = mesh_obj.v
+            faces = mesh_obj.f
+            
+            # Вычисляем площади треугольников
+            v0 = vertices[faces[:, 0]]
+            v1 = vertices[faces[:, 1]] 
+            v2 = vertices[faces[:, 2]]
+            
+            edge1 = v1 - v0
+            edge2 = v2 - v0
+            cross_product = torch.cross(edge1, edge2, dim=1)
+            areas = 0.5 * torch.norm(cross_product, dim=1)
+            
+            # Сортируем по площади и оставляем самые большие
+            sorted_indices = torch.argsort(areas, descending=True)
+            keep_count = int(len(sorted_indices) * reduction_factor)
+            keep_faces = sorted_indices[:keep_count]
+            
+            new_faces = faces[keep_faces]
+            mesh_obj.f = new_faces
+            
+            if mesh_obj.fn is not None:
+                mesh_obj.fn = new_faces
+            
+            # Пересчитываем нормали
+            mesh_obj.auto_normal()
+            
+            print(f"Face reduction: {len(faces)} → {len(new_faces)} граней ({reduction_factor*100:.0f}%)")
+            
+        except Exception as e:
+            print(f"Face reduction ошибка: {e}")
+        
+        return mesh_obj
+
+
+class Hunyuan3D_21_TexGen_Complete:
+    """Hunyuan3D-2.1 Texture Generation - ПОЛНАЯ ВЕРСИЯ с FastMesh"""
+    
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "texgen_pipe": ("TEXGEN_PIPE",),
+                "mesh": ("MESH",),
+                "image": ("IMAGE",),
+                "output_fastmesh": ("BOOLEAN", {"default": True, "tooltip": "Выход FastMesh (иначе стандартный Mesh)"}),
+                "create_pbr": ("BOOLEAN", {"default": True, "tooltip": "Создать PBR материалы"}),
+                "use_remesh": ("BOOLEAN", {"default": False}),
+            },
+        }
+    
+    RETURN_TYPES = ("MESH",)
+    RETURN_NAMES = ("mesh",)
+    FUNCTION = "generate"
+    CATEGORY = "Comfy3D/Generation/Hunyuan3D"
+    
+    @torch.no_grad()
+    def generate(self, texgen_pipe, mesh, image, output_fastmesh, create_pbr, use_remesh):
+        
+        try:
+            # Подготовка
+            pil_image = torch_imgs_to_pils(image)[0]
+            temp_dir = "temp_texgen"
+            os.makedirs(temp_dir, exist_ok=True)
+            
+            # Сохраняем mesh как OBJ для texgen пайплайна
+            obj_path = os.path.join(temp_dir, "input_mesh.obj")
+            mesh.write(obj_path)
+            print(f"✅ Mesh сохранен как OBJ: {obj_path}")
+            
+            # Генерация текстур
+            print("🎨 Запуск TexGen...")
             result_path = texgen_pipe(
-                mesh_path=mesh_path,
-                image_path=image_path,
-                output_mesh_path=output_path,
-                save_glb=True,  # Always create GLB
+                mesh_path=obj_path,
+                image_path=torch_imgs_to_pils([pil_image])[0] if hasattr(pil_image, 'save') else pil_image,
+                output_mesh_path=os.path.join(temp_dir, "textured_output.obj"),
+                save_glb=True,
                 use_remesh=use_remesh
             )
             
-            mesh_out = None
+            # Создаем GLB с текстурами
+            glb_path = result_path.replace(".obj", ".glb")
             
             if create_pbr:
-                glb_path = result_path.replace(".obj", ".glb")
+                # Загружаем отдельные текстуры
+                base_path = os.path.splitext(result_path)[0]
+                textures = {}
                 
-                if not os.path.exists(glb_path):
-                    base_path = os.path.splitext(result_path)[0]
-                    textures_dict = {
-                        'albedo': f"{base_path}.jpg",
-                    }
-                    
-                    metallic_path = f"{base_path}_metallic.jpg"
-                    roughness_path = f"{base_path}_roughness.jpg"
-                    normal_path = f"{base_path}_normal.jpg"
-                    
-                    if os.path.exists(metallic_path):
-                        textures_dict['metallic'] = metallic_path
-                    if os.path.exists(roughness_path):
-                        textures_dict['roughness'] = roughness_path
-                    if os.path.exists(normal_path):
-                        textures_dict['normal'] = normal_path
-                    
-                    try:
-                        create_glb_with_pbr_materials_2_1(result_path, textures_dict, glb_path)
-                        print(f"✅ Создан GLB с PBR материалами: {glb_path}")
-                    except Exception as e:
-                        print(f"⚠️ Ошибка создания GLB с PBR: {e}")
-                        # Fallback to basic conversion
-                        from .Gen_3D_Modules.Hunyuan3D_2_1.hy3dpaint.DifferentiableRenderer.mesh_utils import convert_obj_to_glb
-                        convert_obj_to_glb(result_path, glb_path)
-                        print(f"✅ Создан GLB базовой конвертацией: {glb_path}")
+                albedo_path = f"{base_path}.jpg"
+                if os.path.exists(albedo_path):
+                    textures['albedo'] = albedo_path
                 
-                # Загружаем GLB через FastMesh или стандартный Mesh
-                if os.path.exists(glb_path):
-                    try:
-                        if use_fastmesh:
-                            print(f"🚀 Загружаем GLB через FastMesh: {glb_path}")
-                            mesh_out = FastMesh.load(glb_path)
-                            
-                            if mesh_out is not None:
-                                print(f"✅ FastMesh загрузка успешна!")
-                                print(f"   Вершины: {mesh_out.v.shape}")
-                                print(f"   Грани: {mesh_out.f.shape}")
-                                print(f"   UV: {mesh_out.vt.shape if mesh_out.vt is not None else 'None'}")
-                                print(f"   Текстуры: {mesh_out.albedo.shape if mesh_out.albedo is not None else 'None'}")
-                            else:
-                                print("❌ FastMesh вернул None")
-                                use_fastmesh = False
-                        
-                        # Fallback к стандартному способу
-                        if not use_fastmesh or mesh_out is None:
-                            print(f"🔄 Fallback к стандартному Mesh.load_gltf: {glb_path}")
-                            mesh_out = Mesh.load_gltf(glb_path)
-                            
-                            if mesh_out is not None:
-                                mesh_out.auto_normal()
-                                print(f"✅ Стандартная загрузка GLB успешна")
-                            else:
-                                print("⚠️ Стандартная загрузка тоже не удалась")
-                                
-                    except Exception as e:
-                        print(f"❌ Ошибка загрузки GLB: {e}")
-                        mesh_out = None
-            
-            # Если GLB не удался, загружаем OBJ
-            if mesh_out is None:
-                try:
-                    if use_fastmesh:
-                        print(f"🔄 FastMesh fallback к OBJ: {result_path}")
-                        mesh_out = FastMesh.load(result_path)
-                    else:
-                        print(f"🔄 Стандартная загрузка OBJ: {result_path}")
-                        mesh_out = Mesh.load_obj(result_path)
-                    
-                    if mesh_out is not None:
-                        if not hasattr(mesh_out, 'auto_normal') or mesh_out.auto_normal is None:
-                            # Если это FastMesh, у него уже есть auto_normal
-                            pass
-                        else:
-                            mesh_out.auto_normal()
-                        
-                        if create_pbr:
-                            print("⚠️ PBR GLB не удался, загружена OBJ модель")
-                        else:
-                            print("✅ Загружена OBJ модель")
-                    else:
-                        raise Exception("OBJ загрузка не удалась")
-                        
-                except Exception as e:
-                    print(f"❌ Критическая ошибка: {e}")
-                    # Последний fallback - через trimesh
-                    print("🆘 Последний fallback через trimesh...")
-                    import trimesh
-                    textured_mesh = trimesh.load(result_path)
-                    mesh_out = Mesh.load_trimesh(given_mesh=textured_mesh)
-                    mesh_out.auto_normal()
-                    print("✅ Загружено через trimesh (fallback)")
-            
-            return (mesh_out,)
-            
-        finally:
-            # Clean up files
-            torch.cuda.empty_cache()
-            gc.collect()
-            
-            for file_path in [image_path, output_path]:
-                try:
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                except:
-                    pass
-
-
-class Hunyuan3D_21_ShapeGen_FastMesh:
-    """Hunyuan3D-2.1 Shape Generation с поддержкой FastMesh"""
-    
-    CATEGORY = "Comfy3D/Algorithm/Hunyuan3D-2.1"
-    RETURN_TYPES = ("MESH", "IMAGE")
-    RETURN_NAMES = ("mesh", "processed_image")
-    FUNCTION = "generate"
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "shapegen_pipe": ("DIFFUSERS_PIPE",),
-                "image": ("IMAGE",),
-                "seed": ("INT", {"default": 1234, "min": 0, "max": 0xffffffffffffffff}),
-                "steps": ("INT", {"default": 30, "min": 1, "max": 100}),
-                "guidance_scale": ("FLOAT", {"default": 7.5, "min": 0.0, "step": 0.1}),
-                "octree_resolution": ("INT", {"default": 256, "min": 64, "max": 512}),
-                "remove_background": ("BOOLEAN", {"default": True}),
-                "auto_cleanup": ("BOOLEAN", {"default": True}),
-                "output_fastmesh": ("BOOLEAN", {"default": False, "tooltip": "Выводить FastMesh вместо стандартного Mesh"}),
-            }
-        }
-
-    @torch.no_grad()
-    def generate(self, shapegen_pipe, image, seed, steps, guidance_scale, octree_resolution, remove_background, auto_cleanup, output_fastmesh):
-        pil_image = torch_imgs_to_pils(image)[0].convert("RGBA")
-        
-        if remove_background or pil_image.mode == "RGB":
-            rmbg_worker = BackgroundRemover_2_1()
-            pil_image = rmbg_worker(pil_image.convert('RGB'))
-            del rmbg_worker
-
-        generator = torch.Generator(device=shapegen_pipe.device)
-        generator = generator.manual_seed(int(seed))
-        
-        outputs = shapegen_pipe(
-            image=pil_image,
-            num_inference_steps=steps,
-            guidance_scale=guidance_scale,
-            generator=generator,
-            octree_resolution=octree_resolution,
-            num_chunks=200000,
-            output_type='mesh'
-        )
-        
-        # Получаем trimesh объект из пайплайна
-        trimesh_obj = export_to_trimesh_2_1(outputs)[0]
-        
-        face_reduce_worker = FaceReducer_2_1()
-        trimesh_obj = face_reduce_worker(trimesh_obj)
-        del face_reduce_worker
-        
-        # Auto cleanup pipeline if enabled
-        if auto_cleanup:
-            try:
-                shapegen_pipe.to('cpu')
-                if hasattr(shapegen_pipe, 'unet'):
-                    del shapegen_pipe.unet
-                if hasattr(shapegen_pipe, 'vae'):
-                    del shapegen_pipe.vae
-                if hasattr(shapegen_pipe, 'scheduler'):
-                    del shapegen_pipe.scheduler
-                del outputs
-                torch.cuda.empty_cache()
-                gc.collect()
-                print("Shape pipeline cleaned up")
-            except Exception as e:
-                print(f"Error during pipeline cleanup: {e}")
-        
-        # Конвертируем trimesh в наш Mesh объект
-        mesh_out = None
-        
-        if output_fastmesh:
-            try:
-                print("🚀 Попытка конвертации в FastMesh...")
-                # Сохраняем во временный файл и загружаем через FastMesh
-                temp_glb_path = "temp_shapegen_fastmesh.glb"
-                trimesh_obj.export(temp_glb_path)
+                metallic_path = f"{base_path}_metallic.jpg"
+                if os.path.exists(metallic_path):
+                    textures['metallic'] = metallic_path
                 
-                try:
-                    mesh_out = FastMesh.load(temp_glb_path)
-                    
-                    if mesh_out is not None:
-                        print("✅ Конвертация в FastMesh успешна!")
+                roughness_path = f"{base_path}_roughness.jpg"
+                if os.path.exists(roughness_path):
+                    textures['roughness'] = roughness_path
+                
+                # Создаем GLB с нашей функцией
+                success = self._create_complete_glb(result_path, textures, glb_path, output_fastmesh)
+                
+                if not success:
+                    # Fallback - простая конвертация
+                    if output_fastmesh:
+                        temp_mesh = FastMesh.load(result_path)
                     else:
-                        print("⚠️ FastMesh конвертация вернула None")
-                        
-                finally:
-                    # Удаляем временный файл
-                    if os.path.exists(temp_glb_path):
-                        os.remove(temp_glb_path)
-                        
-            except Exception as e:
-                print(f"❌ Ошибка FastMesh конвертации: {e}")
-        
-        # Fallback к стандартному методу
-        if mesh_out is None:
-            try:
-                print("🔄 Fallback к стандартной конвертации...")
-                mesh_out = Mesh.from_trimesh(trimesh_obj, use_new_converter=True)
+                        temp_mesh = Mesh.load_obj(result_path)
+                    
+                    if temp_mesh is not None:
+                        temp_mesh.write(glb_path)
+                        print(f"✅ GLB создан простой конвертацией: {glb_path}")
+            
+            # Загружаем финальный результат
+            if os.path.exists(glb_path):
+                if output_fastmesh:
+                    mesh_out = FastMesh.load(glb_path)
+                    print("🚀 GLB загружен через FastMesh")
+                else:
+                    mesh_out = Mesh.load_gltf(glb_path)
+                    print("🔧 GLB загружен через стандартный Mesh")
                 
                 if mesh_out is not None:
                     mesh_out.auto_normal()
-                    print("✅ Стандартная конвертация успешна")
-                else:
-                    print("⚠️ Стандартная конвертация вернула None, используем старую")
-                    mesh_out = Mesh.load_trimesh(given_mesh=trimesh_obj)
-                    mesh_out.auto_normal()
-                    
-            except Exception as e:
-                print(f"❌ Ошибка стандартной конвертации: {e}")
-                print("🆘 Последний fallback...")
-                mesh_out = Mesh.load_trimesh(given_mesh=trimesh_obj)
+                    print(f"✅ TexGen завершен: текстуры применены")
+                    return (mesh_out,)
+            
+            # Fallback если GLB не создался
+            print("⚠️ GLB не создался, загружаем OBJ...")
+            if output_fastmesh:
+                mesh_out = FastMesh.load(result_path)
+            else:
+                mesh_out = Mesh.load_obj(result_path)
+            
+            if mesh_out is not None:
                 mesh_out.auto_normal()
-        
-        processed_image_tensor = pils_to_torch_imgs([pil_image])
-        
-        return (mesh_out, processed_image_tensor)
-
-
-class FastMesh_Test:
-    """Тест FastMesh vs стандартный Mesh"""
+                return (mesh_out,)
+            
+            raise Exception("Не удалось загрузить результат")
+            
+        except Exception as e:
+            print(f"❌ TexGen ошибка: {e}")
+            return (mesh,)  # Возвращаем оригинальный mesh
     
-    CATEGORY = "Comfy3D/Algorithm/Hunyuan3D-2.1"
-    RETURN_TYPES = ("MESH", "MESH", "STRING")
-    RETURN_NAMES = ("mesh_standard", "mesh_fast", "comparison_report")
-    FUNCTION = "test"
+    def _create_complete_glb(self, obj_path, textures_dict, output_glb_path, use_fastmesh=True):
+        """Создает полный GLB с текстурами"""
+        
+        try:
+            print(f"🎨 Создаем полный GLB: {output_glb_path}")
+            
+            # Загружаем OBJ
+            if use_fastmesh:
+                mesh = FastMesh.load(obj_path)
+            else:
+                mesh = Mesh.load_obj(obj_path)
+            
+            if mesh is None:
+                return False
+            
+            # Загружаем albedo
+            if 'albedo' in textures_dict:
+                albedo = cv2.imread(textures_dict['albedo'], cv2.IMREAD_COLOR)
+                if albedo is not None:
+                    albedo = cv2.cvtColor(albedo, cv2.COLOR_BGR2RGB)
+                    albedo = albedo.astype(np.float32) / 255.0
+                    mesh.albedo = torch.tensor(albedo, dtype=torch.float32, device=mesh.device)
+                    print(f"✅ Albedo загружен: {albedo.shape}")
+            
+            # Создаем metallic-roughness
+            metallic_data = None
+            roughness_data = None
+            
+            if 'metallic' in textures_dict:
+                metallic = cv2.imread(textures_dict['metallic'], cv2.IMREAD_GRAYSCALE)
+                if metallic is not None:
+                    metallic_data = metallic.astype(np.float32) / 255.0
+            
+            if 'roughness' in textures_dict:
+                roughness = cv2.imread(textures_dict['roughness'], cv2.IMREAD_GRAYSCALE)
+                if roughness is not None:
+                    roughness_data = roughness.astype(np.float32) / 255.0
+            
+            # Комбинируем metallic-roughness
+            if metallic_data is not None or roughness_data is not None:
+                if mesh.albedo is not None:
+                    h, w = mesh.albedo.shape[:2]
+                    mr_texture = np.zeros((h, w, 3), dtype=np.float32)
+                    
+                    if roughness_data is not None:
+                        if roughness_data.shape != (h, w):
+                            roughness_data = cv2.resize(roughness_data, (w, h))
+                        mr_texture[:, :, 1] = roughness_data
+                    else:
+                        mr_texture[:, :, 1] = 0.8  # Default roughness
+                    
+                    if metallic_data is not None:
+                        if metallic_data.shape != (h, w):
+                            metallic_data = cv2.resize(metallic_data, (w, h))
+                        mr_texture[:, :, 2] = metallic_data
+                    else:
+                        mr_texture[:, :, 2] = 0.1  # Default metallic
+                    
+                    mesh.metallicRoughness = torch.tensor(mr_texture, dtype=torch.float32, device=mesh.device)
+                    print(f"✅ MetallicRoughness создан: {mr_texture.shape}")
+            
+            # Генерируем UV если нужно
+            if mesh.vt is None and mesh.albedo is not None:
+                print("🗺️ Генерируем UV...")
+                mesh.auto_uv(cache_path=obj_path)
+            
+            # Сохраняем GLB
+            mesh.write(output_glb_path)
+            print(f"✅ Полный GLB создан: {output_glb_path}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Ошибка создания полного GLB: {e}")
+            return False
 
+
+class FastMesh_Utilities:
+    """Утилиты для работы с FastMesh"""
+    
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "glb_path": ("STRING", {"default": ""}),
-            }
+                "mesh": ("MESH",),
+                "operation": (["info", "optimize", "clean", "auto_uv", "to_fastmesh", "to_standard_mesh"], {"default": "info"}),
+            },
         }
+    
+    RETURN_TYPES = ("MESH", "STRING")
+    RETURN_NAMES = ("mesh", "info")
+    FUNCTION = "process"
+    CATEGORY = "Comfy3D/Utilities"
+    
+    def process(self, mesh, operation):
+        
+        info = ""
+        mesh_out = mesh
+        
+        try:
+            if operation == "info":
+                info = self._get_mesh_info(mesh)
+                
+            elif operation == "optimize":
+                mesh_out = self._optimize_mesh(mesh)
+                info = "Mesh оптимизирован"
+                
+            elif operation == "clean":
+                mesh_out = self._clean_mesh(mesh)
+                info = "Mesh очищен"
+                
+            elif operation == "auto_uv":
+                mesh_out = self._generate_uv(mesh)
+                info = "UV координаты сгенерированы"
+                
+            elif operation == "to_fastmesh":
+                if isinstance(mesh, FastMesh):
+                    info = "Mesh уже FastMesh"
+                else:
+                    mesh_out = self._convert_to_fastmesh(mesh)
+                    info = "Конвертирован в FastMesh"
+                    
+            elif operation == "to_standard_mesh":
+                if isinstance(mesh, Mesh) and not isinstance(mesh, FastMesh):
+                    info = "Mesh уже стандартный"
+                else:
+                    mesh_out = self._convert_to_standard_mesh(mesh)
+                    info = "Конвертирован в стандартный Mesh"
+            
+        except Exception as e:
+            info = f"Ошибка: {e}"
+            
+        return (mesh_out, info)
+    
+    def _get_mesh_info(self, mesh):
+        """Получает информацию о mesh"""
+        
+        info_lines = []
+        
+        # Тип mesh
+        if isinstance(mesh, FastMesh):
+            info_lines.append("🚀 Тип: FastMesh")
+        elif isinstance(mesh, Mesh):
+            info_lines.append("🔧 Тип: Стандартный Mesh")
+        else:
+            info_lines.append(f"❓ Тип: {type(mesh).__name__}")
+        
+        # Геометрия
+        if hasattr(mesh, 'v') and mesh.v is not None:
+            info_lines.append(f"📐 Вершины: {mesh.v.shape[0]}")
+        
+        if hasattr(mesh, 'f') and mesh.f is not None:
+            info_lines.append(f"🔺 Грани: {mesh.f.shape[0]}")
+        
+        # Атрибуты
+        attrs = []
+        if hasattr(mesh, 'vn') and mesh.vn is not None:
+            attrs.append(f"Нормали: {mesh.vn.shape[0]}")
+        
+        if hasattr(mesh, 'vt') and mesh.vt is not None:
+            attrs.append(f"UV: {mesh.vt.shape[0]}")
+        
+        if hasattr(mesh, 'vc') and mesh.vc is not None:
+            attrs.append(f"Цвета: {mesh.vc.shape[0]}")
+        
+        if attrs:
+            info_lines.append(f"📊 Атрибуты: {', '.join(attrs)}")
+        
+        # Текстуры
+        textures = []
+        if hasattr(mesh, 'albedo') and mesh.albedo is not None:
+            textures.append(f"Albedo: {mesh.albedo.shape}")
+        
+        if hasattr(mesh, 'metallicRoughness') and mesh.metallicRoughness is not None:
+            textures.append(f"MetallicRoughness: {mesh.metallicRoughness.shape}")
+        
+        if textures:
+            info_lines.append(f"🎨 Текстуры: {', '.join(textures)}")
+        
+        # Device
+        if hasattr(mesh, 'device'):
+            info_lines.append(f"💾 Device: {mesh.device}")
+        
+        return "\n".join(info_lines)
+    
+    def _optimize_mesh(self, mesh):
+        """Оптимизирует mesh"""
+        # Удаляем дубликаты вершин, пересчитываем нормали, UV
+        if hasattr(mesh, 'auto_normal'):
+            mesh.auto_normal()
+        return mesh
+    
+    def _clean_mesh(self, mesh):
+        """Очищает mesh"""
+        if hasattr(mesh, '_clean_mesh'):
+            mesh._clean_mesh()
+        return mesh
+    
+    def _generate_uv(self, mesh):
+        """Генерирует UV координаты"""
+        if hasattr(mesh, 'auto_uv'):
+            mesh.auto_uv()
+        return mesh
+    
+    def _convert_to_fastmesh(self, mesh):
+        """Конвертирует в FastMesh"""
+        if isinstance(mesh, FastMesh):
+            return mesh
+        
+        return FastMesh(
+            v=mesh.v,
+            f=mesh.f,
+            vn=mesh.vn,
+            fn=mesh.fn,
+            vt=mesh.vt,
+            ft=mesh.ft,
+            vc=mesh.vc,
+            albedo=mesh.albedo,
+            metallicRoughness=mesh.metallicRoughness,
+            device=mesh.device
+        )
+    
+    def _convert_to_standard_mesh(self, mesh):
+        """Конвертирует в стандартный Mesh"""
+        if isinstance(mesh, Mesh) and not isinstance(mesh, FastMesh):
+            return mesh
+        
+        return Mesh(
+            v=mesh.v,
+            f=mesh.f,
+            vn=mesh.vn,
+            fn=mesh.fn,
+            vt=mesh.vt,
+            ft=mesh.ft,
+            vc=mesh.vc,
+            albedo=mesh.albedo,
+            metallicRoughness=mesh.metallicRoughness,
+            device=mesh.device
+        )
 
-    def test(self, glb_path):
-        import time
-        
-        if not glb_path or not os.path.exists(glb_path):
-            return (None, None, f"❌ Файл не найден: {glb_path}")
-        
-        if not glb_path.lower().endswith(('.glb', '.gltf')):
-            return (None, None, f"❌ Не GLB/GLTF файл: {glb_path}")
-        
-        mesh_standard = None
-        mesh_fast = None
-        
-        # Тест стандартного загрузчика
-        try:
-            start_time = time.time()
-            mesh_standard = Mesh.load_gltf(glb_path)
-            standard_time = time.time() - start_time
-            standard_status = f"✅ {standard_time:.3f}s"
-        except Exception as e:
-            standard_status = f"❌ {str(e)[:50]}"
-            standard_time = 0
-        
-        # Тест FastMesh
-        try:
-            start_time = time.time()
-            mesh_fast = FastMesh.load(glb_path)
-            fast_time = time.time() - start_time
-            fast_status = f"✅ {fast_time:.3f}s"
-        except Exception as e:
-            fast_status = f"❌ {str(e)[:50]}"
-            fast_time = 0
-        
-        # Создаем отчет
-        report_lines = [
-            f"📊 Сравнение загрузчиков GLB: {os.path.basename(glb_path)}",
-            f"🔧 Стандартный Mesh.load_gltf: {standard_status}",
-            f"🚀 FastMesh.load: {fast_status}",
-        ]
-        
-        if mesh_standard and mesh_fast and standard_time > 0 and fast_time > 0:
-            speed_diff = ((fast_time / standard_time - 1) * 100)
-            report_lines.append(f"⚡ Скорость FastMesh: {speed_diff:+.1f}%")
-            
-            # Сравнение геометрии
-            if mesh_standard.v is not None and mesh_fast.v is not None:
-                vertices_match = torch.allclose(mesh_standard.v, mesh_fast.v, atol=1e-5)
-                report_lines.append(f"📐 Вершины: {'✅ совпадают' if vertices_match else '❌ различаются'}")
-            
-            if mesh_standard.f is not None and mesh_fast.f is not None:
-                faces_match = torch.equal(mesh_standard.f, mesh_fast.f)
-                report_lines.append(f"🔺 Грани: {'✅ совпадают' if faces_match else '❌ различаются'}")
-            
-            # UV и текстуры
-            uv_std = mesh_standard.vt is not None
-            uv_fast = mesh_fast.vt is not None
-            report_lines.append(f"🗺️ UV: стандартный={uv_std}, FastMesh={uv_fast}")
-            
-            tex_std = mesh_standard.albedo is not None
-            tex_fast = mesh_fast.albedo is not None
-            report_lines.append(f"🎨 Текстуры: стандартный={tex_std}, FastMesh={tex_fast}")
-            
-            if tex_std and tex_fast:
-                try:
-                    texture_match = torch.allclose(mesh_standard.albedo, mesh_fast.albedo, atol=1e-3)
-                    report_lines.append(f"🖼️ Качество текстур: {'✅ идентичны' if texture_match else '❌ различаются'}")
-                except:
-                    report_lines.append("🖼️ Качество текстур: ❓ не удалось сравнить")
-        
-        report = "\n".join(report_lines)
-        return (mesh_standard, mesh_fast, report)
+
