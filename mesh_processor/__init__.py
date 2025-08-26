@@ -32,6 +32,13 @@ from .rigging_ops import (
     insert_generated_data_to_gltf,
 )
 from .validate import validate_before_save
+from .mesh import (
+    Mesh,
+    FastMesh,
+    TrimeshLike,
+    TrimeshLikeLoader,
+    PointCloud,
+)
 
 __all__ = [
     "GltfDocument",
@@ -58,6 +65,11 @@ __all__ = [
     "clean_skin_data_from_gltf",
     "insert_generated_data_to_gltf",
     "validate_before_save",
+    "Mesh",
+    "FastMesh", 
+    "TrimeshLike",
+    "TrimeshLikeLoader",
+    "PointCloud",
 ]
 
 
