@@ -10,7 +10,7 @@ MODULE_PATH = os.path.join(ROOT_PATH, "Gen_3D_Modules")
 MV_ALGO_PATH = os.path.join(ROOT_PATH, "MVs_Algorithms")
 MESH_PROCESSOR_PATH = os.path.join(ROOT_PATH, "mesh_processor")
 
-sys.path.append(ROOT_PATH)
+sys.path.insert(0, ROOT_PATH)
 sys.path.append(MODULE_PATH)
 sys.path.append(MV_ALGO_PATH)
 sys.path.append(MESH_PROCESSOR_PATH)

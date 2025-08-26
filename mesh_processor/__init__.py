@@ -72,4 +72,18 @@ __all__ = [
     "PointCloud",
 ]
 
+try:
+    from .export_utils import (
+        export_to_fastmesh,
+        export_to_mesh, 
+        export_to_mesh_ultra_fast,
+    )
+    __all__.extend([
+        "export_to_fastmesh",
+        "export_to_mesh",
+        "export_to_mesh_ultra_fast",
+    ])
+except ImportError:
+    pass
+
 
