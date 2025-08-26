@@ -6170,7 +6170,8 @@ import os
 import gc
 import torch
 from mesh_processor import fastglb  # Наша новая библиотека
-
+from mesh_processor.export_utils import export_to_fastmesh, export_to_mesh
+from mesh_processor.mesh import FastMesh, Mesh
 
 class Hunyuan3D_21_ShapeGen_Complete:
     """Hunyuan3D-2.1 Shape Generation - ПОЛНАЯ ВЕРСИЯ с FastMesh"""
@@ -6179,7 +6180,7 @@ class Hunyuan3D_21_ShapeGen_Complete:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "shapegen_pipe": ("SHAPEGEN_PIPE",),
+                "shapegen_pipe": ("DIFFUSERS_PIPE",),
                 "image": ("IMAGE",),
                 "seed": ("INT", {"default": 42, "min": 0, "max": 0xffffffffffffffff}),
                 "steps": ("INT", {"default": 30, "min": 1, "max": 100}),

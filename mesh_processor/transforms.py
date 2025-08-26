@@ -141,13 +141,13 @@ def set_node_trs_identity(doc: GltfDocument, node_idx: int) -> None:
 
 
 def preprocess_transforms_inplace(doc: GltfDocument) -> None:
-    """Применить матрицы трансформации узлов к позициям вершин и обнулить TRS у узлов.
+    """Apply node transforms to vertex positions and set TRS for all nodes.
 
-    Идея: для каждого меша считаем глобальную матрицу, трансформируем POSITION у всех
-    примитивов этого меша и удаляем transform у узлов, ссылающихся на данный меш.
+    Idea: for each mesh, we calculate the global matrix, transform the POSITION of all
+    primitives of this mesh and remove the transform for the nodes referring to this mesh.
     """
     mesh_transforms = compute_mesh_global_transforms(doc)
-    # быстрый выход, если все identity
+    # quick exit if all identity
     any_non_identity = any(
         not np.allclose(M, np.eye(4), atol=1e-6) for M in mesh_transforms.values()
     )
@@ -157,7 +157,7 @@ def preprocess_transforms_inplace(doc: GltfDocument) -> None:
     for mesh_idx, M in mesh_transforms.items():
         if np.allclose(M, np.eye(4), atol=1e-6):
             continue
-        # трансформация всех позиций в меше
+        # transform all positions in the mesh
         mesh = doc.meshes()[mesh_idx]
         for primitive in mesh.get("primitives", []):
             attrs = primitive.get("attributes", {})
@@ -171,7 +171,7 @@ def preprocess_transforms_inplace(doc: GltfDocument) -> None:
             update_accessor_binary_data(doc, acc_idx, transformed)
             recompute_accessor_min_max(doc, acc_idx)
 
-        # сбросить TRS у всех узлов, которые указывают на этот меш
+        # reset TRS for all nodes referring to this mesh
         for node_idx, node in enumerate(doc.nodes()):
             if node.get("mesh") == mesh_idx:
                 set_node_trs_identity(doc, node_idx)

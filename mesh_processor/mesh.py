@@ -953,8 +953,30 @@ class Mesh:
         v_np = self.v.detach().cpu().numpy()
         f_np = self.f.detach().cpu().numpy()
 
-        _mesh = trimesh.Trimesh(vertices=v_np, faces=f_np)
-        _mesh.export(path)
+        # Простая PLY запись БЕЗ trimesh
+        self._write_ply_simple(path, v_np, f_np)
+    
+    def _write_ply_simple(self, path, vertices, faces):
+        """Простая запись PLY без trimesh"""
+        with open(path, 'w') as f:
+            # PLY header
+            f.write("ply\n")
+            f.write("format ascii 1.0\n")
+            f.write(f"element vertex {len(vertices)}\n")
+            f.write("property float x\n")
+            f.write("property float y\n")
+            f.write("property float z\n")
+            f.write(f"element face {len(faces)}\n")
+            f.write("property list uchar int vertex_indices\n")
+            f.write("end_header\n")
+            
+            # Vertices
+            for v in vertices:
+                f.write(f"{v[0]} {v[1]} {v[2]}\n")
+            
+            # Faces
+            for face in faces:
+                f.write(f"3 {face[0]} {face[1]} {face[2]}\n")
 
 
     def write_glb(self, path):
