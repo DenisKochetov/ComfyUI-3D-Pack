@@ -89,7 +89,7 @@ class Hunyuan3D_21_ShapeGen_Optimized:
             else:
                 mesh_objects = export_to_mesh(outputs)
                 mesh_out = mesh_objects[0] if isinstance(mesh_objects, list) else mesh_objects
-                print("✅ Стандартный Mesh создан напрямую!")
+                print("✅ Стандартный Mesh создан напрямую (БЫСТРО)!")
             
             if mesh_out is None:
                 raise Exception("Не удалось создать mesh из пайплайна")
@@ -121,13 +121,16 @@ class Hunyuan3D_21_ShapeGen_Optimized:
                 mesh_out.auto_normal()
                 print("✅ Нормали вычислены")
             
-            # Cleanup
+            # Cleanup (ОПТИМИЗИРОВАННЫЙ - пайплайн остается на GPU)
             if auto_cleanup:
                 try:
-                    shapegen_pipe.to('cpu')
+                    # НЕ перемещаем пайплайн на CPU для скорости следующих запусков!
+                    # shapegen_pipe.to('cpu')  # УБРАНО для производительности!
+                    
+                    # Только очищаем кэш GPU
                     torch.cuda.empty_cache()
                     gc.collect()
-                    print("✅ Cleanup завершен")
+                    print("✅ БЫСТРЫЙ Cleanup завершен (пайплайн готов к следующему запуску)")
                 except Exception as e:
                     print(f"⚠️ Cleanup ошибка: {e}")
             

@@ -135,14 +135,72 @@ def _convert_single_mesh_to_mesh(mesh_obj, device):
         # Автоматически генерируем нормали
         mesh.auto_normal()
         
-        # Создаем пустую текстуру
-        mesh.set_new_albedo(1024, 1024)
+        # Создаем пустую текстуру БЫСТРО (БЕЗ prepare_torch_img)
+        mesh._create_empty_albedo_fast()
         
         print(f"[export_to_mesh] Mesh создан успешно")
         return mesh
         
     except Exception as e:
         print(f"[export_to_mesh] Ошибка: {e}")
+        return None
+
+
+def export_to_mesh_ultra_fast(mesh_output, device=None):
+    """
+    УЛЬТРА-БЫСТРЫЙ экспорт в стандартный Mesh БЕЗ любых медленных операций
+    """
+    
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    try:
+        # Обработка списка или одиночного объекта
+        if isinstance(mesh_output, list):
+            return [_convert_single_mesh_to_mesh_ultra_fast(mesh, device) for mesh in mesh_output]
+        else:
+            return _convert_single_mesh_to_mesh_ultra_fast(mesh_output, device)
+    
+    except Exception as e:
+        print(f"[export_to_mesh_ultra_fast] Ошибка: {e}")
+        return None
+
+
+def _convert_single_mesh_to_mesh_ultra_fast(mesh_obj, device):
+    """Конвертирует один mesh объект в стандартный Mesh УЛЬТРА-БЫСТРО"""
+    
+    try:
+        # Извлекаем вершины и грани
+        vertices = mesh_obj.mesh_v
+        faces = mesh_obj.mesh_f
+        
+        # Переворачиваем грани (как в оригинальной функции)
+        faces = faces[:, ::-1]
+        
+        # Конвертируем в numpy если нужно
+        if hasattr(vertices, 'cpu'):
+            vertices = vertices.cpu().numpy()
+        if hasattr(faces, 'cpu'):
+            faces = faces.cpu().numpy()
+        
+        vertices = np.array(vertices, dtype=np.float32)
+        faces = np.array(faces, dtype=np.int32)
+        
+        print(f"[export_to_mesh_ultra_fast] Конвертируем: {vertices.shape[0]} вершин, {faces.shape[0]} граней")
+        
+        # Создаем стандартный Mesh МИНИМАЛЬНО
+        mesh = Mesh(device=device)
+        mesh.v = torch.tensor(vertices, dtype=torch.float32, device=device)
+        mesh.f = torch.tensor(faces, dtype=torch.int32, device=device)
+        
+        # НЕ генерируем нормали (можно сделать позже если нужно)
+        # НЕ создаем текстуру (экономим время)
+        
+        print(f"[export_to_mesh_ultra_fast] Mesh создан МГНОВЕННО")
+        return mesh
+        
+    except Exception as e:
+        print(f"[export_to_mesh_ultra_fast] Ошибка: {e}")
         return None
 
 

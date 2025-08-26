@@ -6189,6 +6189,7 @@ class Hunyuan3D_21_ShapeGen_Complete:
                 "output_fastmesh": ("BOOLEAN", {"default": True, "tooltip": "Выход FastMesh (иначе стандартный Mesh)"}),
                 "remove_background": ("BOOLEAN", {"default": True}),
                 "auto_cleanup": ("BOOLEAN", {"default": True}),
+                "keep_pipeline_on_gpu": ("BOOLEAN", {"default": True, "tooltip": "Оставить пайплайн на GPU для быстрых повторных запусков"}),
             },
         }
     
@@ -6198,7 +6199,7 @@ class Hunyuan3D_21_ShapeGen_Complete:
     CATEGORY = "Comfy3D/Generation/Hunyuan3D"
     
     @torch.no_grad()
-    def generate(self, shapegen_pipe, image, seed, steps, guidance_scale, octree_resolution, output_fastmesh, remove_background, auto_cleanup):
+    def generate(self, shapegen_pipe, image, seed, steps, guidance_scale, octree_resolution, output_fastmesh, remove_background, auto_cleanup, keep_pipeline_on_gpu):
         
         try:
             # Подготовка изображения
@@ -6239,24 +6240,33 @@ class Hunyuan3D_21_ShapeGen_Complete:
                 mesh_objects = export_to_mesh(outputs)
                 mesh_out = mesh_objects[0] if isinstance(mesh_objects, list) else mesh_objects
                 print("✅ Стандартный Mesh создан напрямую из пайплайна!")
+                
+                # Дополняем нормали и текстуру если нужно (БЫСТРО)
+                if mesh_out.vn is None:
+                    mesh_out.auto_normal()
+                if mesh_out.albedo is None:
+                    mesh_out._create_empty_albedo_fast()
             
             if mesh_out is None:
                 raise Exception("Не удалось создать mesh из пайплайна")
             
             # Face reduction (собственная реализация)
             try:
-                print("🔧 Применяем face reduction...")
-                mesh_out = self._simple_face_reduction(mesh_out)
+                print("🔧 не Применяем face reduction...")
+                # mesh_out = self._simple_face_reduction(mesh_out)
             except Exception as e:
                 print(f"⚠️ Face reduction ошибка: {e}")
             
-            # Cleanup
+            # Cleanup (БЕЗ перемещения пайплайна на CPU!)
             if auto_cleanup:
                 try:
-                    shapegen_pipe.to('cpu')
+                    # НЕ перемещаем пайплайн на CPU - это вызывает проблемы!
+                    # shapegen_pipe.to('cpu')  # УБРАНО!
+                    
+                    # Только очищаем кэш GPU
                     torch.cuda.empty_cache()
                     gc.collect()
-                    print("✅ Cleanup завершен")
+                    print("✅ Cleanup завершен (пайплайн остался на GPU)")
                 except Exception as e:
                     print(f"⚠️ Cleanup ошибка: {e}")
             
@@ -6319,6 +6329,7 @@ class Hunyuan3D_21_TexGen_Complete:
                 "image": ("IMAGE",),
                 "output_fastmesh": ("BOOLEAN", {"default": True, "tooltip": "Выход FastMesh (иначе стандартный Mesh)"}),
                 "create_pbr": ("BOOLEAN", {"default": True, "tooltip": "Создать PBR материалы"}),
+                "skip_uv_generation": ("BOOLEAN", {"default": True, "tooltip": "Пропустить UV генерацию (БЫСТРЕЕ!)"}),
                 "use_remesh": ("BOOLEAN", {"default": False}),
             },
         }
@@ -6329,7 +6340,7 @@ class Hunyuan3D_21_TexGen_Complete:
     CATEGORY = "Comfy3D/Generation/Hunyuan3D"
     
     @torch.no_grad()
-    def generate(self, texgen_pipe, mesh, image, output_fastmesh, create_pbr, use_remesh):
+    def generate(self, texgen_pipe, mesh, image, output_fastmesh, create_pbr, skip_uv_generation, use_remesh):
         
         try:
             # Подготовка
@@ -6373,7 +6384,7 @@ class Hunyuan3D_21_TexGen_Complete:
                     textures['roughness'] = roughness_path
                 
                 # Создаем GLB с нашей функцией
-                success = self._create_complete_glb(result_path, textures, glb_path, output_fastmesh)
+                success = self._create_complete_glb(result_path, textures, glb_path, output_fastmesh, skip_uv_generation)
                 
                 if not success:
                     # Fallback - простая конвертация
@@ -6417,7 +6428,7 @@ class Hunyuan3D_21_TexGen_Complete:
             print(f"❌ TexGen ошибка: {e}")
             return (mesh,)  # Возвращаем оригинальный mesh
     
-    def _create_complete_glb(self, obj_path, textures_dict, output_glb_path, use_fastmesh=True):
+    def _create_complete_glb(self, obj_path, textures_dict, output_glb_path, use_fastmesh=True, skip_uv_generation=True):
         """Создает полный GLB с текстурами"""
         
         try:
@@ -6478,10 +6489,12 @@ class Hunyuan3D_21_TexGen_Complete:
                     mesh.metallicRoughness = torch.tensor(mr_texture, dtype=torch.float32, device=mesh.device)
                     print(f"✅ MetallicRoughness создан: {mr_texture.shape}")
             
-            # Генерируем UV если нужно
-            if mesh.vt is None and mesh.albedo is not None:
-                print("🗺️ Генерируем UV...")
+            # Генерируем UV если нужно (ОПЦИОНАЛЬНО - может быть медленно!)
+            if not skip_uv_generation and mesh.vt is None and mesh.albedo is not None:
+                print("🗺️ ВНИМАНИЕ: Генерируем UV (это может быть медленно)...")
                 mesh.auto_uv(cache_path=obj_path)
+            elif skip_uv_generation:
+                print("⚡ UV генерация пропущена (для скорости)")
             
             # Сохраняем GLB
             mesh.write(output_glb_path)
@@ -6657,3 +6670,15 @@ class FastMesh_Utilities:
         )
 
 
+# # Mapping для ComfyUI
+# NODE_CLASS_MAPPINGS = {
+#     "Hunyuan3D_21_ShapeGen_Complete": Hunyuan3D_21_ShapeGen_Complete,
+#     "Hunyuan3D_21_TexGen_Complete": Hunyuan3D_21_TexGen_Complete,
+#     "FastMesh_Utilities": FastMesh_Utilities,
+# }
+
+# NODE_DISPLAY_NAME_MAPPINGS = {
+#     "Hunyuan3D_21_ShapeGen_Complete": "Hunyuan3D 2.1 ShapeGen (FastMesh)",
+#     "Hunyuan3D_21_TexGen_Complete": "Hunyuan3D 2.1 TexGen (FastMesh)",
+#     "FastMesh_Utilities": "FastMesh Utilities",
+# }

@@ -773,6 +773,13 @@ class Mesh:
             self.albedo = torch.tensor(texture, dtype=torch.float32, device=self.device)
         else:
             self.albedo = prepare_torch_img(self.albedo.unsqueeze(0), res_H, res_W, self.device).squeeze(0).permute(1, 2, 0).contiguous() # (1, 3, H, W) -> (H, W, 3)
+    
+    def _create_empty_albedo_fast(self):
+        """Создает пустую albedo текстуру БЫСТРО (БЕЗ prepare_torch_img)"""
+        if self.albedo is None:
+            texture = np.ones((1024, 1024, 3), dtype=np.float32) * np.array([0.5, 0.5, 0.5])
+            self.albedo = torch.tensor(texture, dtype=torch.float32, device=self.device)
+            print(f"[Mesh] Быстрая пустая текстура: {self.albedo.shape}")
 
     # aabb
     def aabb(self):
