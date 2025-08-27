@@ -5,21 +5,23 @@ import torch
 import numpy as np
 from typing import Union
 from mesh_processor.mesh import Mesh, FastMesh
+from advanced_mesh_simplifier import advanced_reduce_faces, AdvancedFaceReducer
 
 
-def fast_reduce_faces(mesh_obj: Union[Mesh, FastMesh], max_faces: int = 200000) -> Union[Mesh, FastMesh]:
+def fast_reduce_faces(mesh_obj: Union[Mesh, FastMesh], max_faces: int = 200000, 
+                     use_advanced: bool = True) -> Union[Mesh, FastMesh]:
     """
-    Быстрое уменьшение количества граней до заданного максимума
+    Уменьшение количества граней до заданного максимума
     
     Args:
         mesh_obj: FastMesh или Mesh объект
         max_faces: максимальное количество граней (аналог max_facenum в оригинале)
+        use_advanced: использовать продвинутый алгоритм Quadric Edge Collapse
     
     Returns:
         Тот же тип mesh объекта с уменьшенным количеством граней
     """
     try:
-        vertices = mesh_obj.v
         faces = mesh_obj.f
         
         if faces.shape[0] == 0:
@@ -30,34 +32,55 @@ def fast_reduce_faces(mesh_obj: Union[Mesh, FastMesh], max_faces: int = 200000) 
             print(f"[FastPostprocessor] Mesh already has {faces.shape[0]} faces (target: {max_faces})")
             return mesh_obj
         
-        # Вычисляем площади треугольников
-        v0 = vertices[faces[:, 0]]
-        v1 = vertices[faces[:, 1]] 
-        v2 = vertices[faces[:, 2]]
-        
-        edge1 = v1 - v0
-        edge2 = v2 - v0
-        cross_product = torch.cross(edge1, edge2, dim=1)
-        areas = 0.5 * torch.norm(cross_product, dim=1)
-        
-        # Сортируем по площади и оставляем самые большие
-        sorted_indices = torch.argsort(areas, descending=True)
-        keep_faces = sorted_indices[:max_faces]
-        
-        new_faces = faces[keep_faces]
-        mesh_obj.f = new_faces
-        
-        if mesh_obj.fn is not None:
-            mesh_obj.fn = new_faces
-        
-        # Пересчитываем нормали
-        mesh_obj.auto_normal()
-        
-        print(f"[FastPostprocessor] Face reduction: {len(faces)} → {len(new_faces)} граней (target: {max_faces})")
+        if use_advanced:
+            # Используем продвинутый алгоритм Quadric Edge Collapse
+            print(f"[FastPostprocessor] Используем Quadric Edge Collapse: {faces.shape[0]} → {max_faces}")
+            mesh_obj = advanced_reduce_faces(mesh_obj, max_faces)
+        else:
+            # Используем простой алгоритм по площади (старый)
+            print(f"[FastPostprocessor] Используем простое удаление по площади: {faces.shape[0]} → {max_faces}")
+            mesh_obj = _simple_area_reduction(mesh_obj, max_faces)
         
     except Exception as e:
         print(f"[FastPostprocessor] Face reduction ошибка: {e}")
+        # Fallback к простому алгоритму
+        try:
+            mesh_obj = _simple_area_reduction(mesh_obj, max_faces)
+        except Exception as e2:
+            print(f"[FastPostprocessor] Fallback ошибка: {e2}")
     
+    return mesh_obj
+
+
+def _simple_area_reduction(mesh_obj: Union[Mesh, FastMesh], max_faces: int) -> Union[Mesh, FastMesh]:
+    """Простое удаление граней по площади (fallback)"""
+    vertices = mesh_obj.v
+    faces = mesh_obj.f
+    
+    # Вычисляем площади треугольников
+    v0 = vertices[faces[:, 0]]
+    v1 = vertices[faces[:, 1]] 
+    v2 = vertices[faces[:, 2]]
+    
+    edge1 = v1 - v0
+    edge2 = v2 - v0
+    cross_product = torch.cross(edge1, edge2, dim=1)
+    areas = 0.5 * torch.norm(cross_product, dim=1)
+    
+    # Сортируем по площади и оставляем самые большие
+    sorted_indices = torch.argsort(areas, descending=True)
+    keep_faces = sorted_indices[:max_faces]
+    
+    new_faces = faces[keep_faces]
+    mesh_obj.f = new_faces
+    
+    if mesh_obj.fn is not None:
+        mesh_obj.fn = new_faces
+    
+    # Пересчитываем нормали
+    mesh_obj.auto_normal()
+    
+    print(f"[FastPostprocessor] Simple reduction: {len(faces)} → {len(new_faces)} граней")
     return mesh_obj
 
 
@@ -219,11 +242,19 @@ def fast_clean_mesh(mesh_obj: Union[Mesh, FastMesh]) -> Union[Mesh, FastMesh]:
 class FastFaceReducer:
     """Класс для уменьшения граней - аналог FaceReducer"""
     
-    def __init__(self, max_faces: int = 200000):
+    def __init__(self, max_faces: int = 200000, use_advanced: bool = True, 
+                 preserve_boundary: bool = True, preserve_topology: bool = True):
         self.max_faces = max_faces
+        self.use_advanced = use_advanced
+        self.preserve_boundary = preserve_boundary
+        self.preserve_topology = preserve_topology
     
     def __call__(self, mesh_obj: Union[Mesh, FastMesh]) -> Union[Mesh, FastMesh]:
-        return fast_reduce_faces(mesh_obj, self.max_faces)
+        if self.use_advanced:
+            return advanced_reduce_faces(mesh_obj, self.max_faces, 
+                                       self.preserve_boundary, self.preserve_topology)
+        else:
+            return fast_reduce_faces(mesh_obj, self.max_faces, use_advanced=False)
 
 
 class FastFloaterRemover:

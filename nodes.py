@@ -5608,12 +5608,11 @@ class Hunyuan3D_21_ShapeGen:
         )
         
         mesh = export_to_trimesh_2_1(outputs)[0]
+        if auto_cleanup:
+            face_reduce_worker = FaceReducer_2_1()
+            mesh = face_reduce_worker(mesh)
+            del face_reduce_worker
         
-        # face_reduce_worker = FaceReducer_2_1()
-        # mesh = face_reduce_worker(mesh)
-        # del face_reduce_worker
-        
-        # Auto cleanup pipeline if enabled
         # if auto_cleanup:
         #     try:
         #         shapegen_pipe.to('cpu')
