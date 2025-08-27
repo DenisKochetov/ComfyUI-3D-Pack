@@ -6252,7 +6252,7 @@ class Hunyuan3D_21_ShapeGen_Complete:
             # Fast postprocessing (БЕЗ конвертаций в trimesh/pymeshlab)
             try:
                 print("🚀 Применяем БЫСТРЫЙ postprocessing...")
-                mesh_out = fast_reduce_faces(mesh_out, max_faces=200000)
+                mesh_out = fast_reduce_faces(mesh_out, max_faces=200000, use_advanced=True)
             except Exception as e:
                 print(f"⚠️ Fast postprocessing ошибка: {e}")
             
