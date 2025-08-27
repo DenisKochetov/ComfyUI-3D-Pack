@@ -6180,7 +6180,7 @@ class Hunyuan3D_21_ShapeGen_Complete:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "shapegen_pipe": ("SHAPEGEN_PIPE",),
+                "shapegen_pipe": ("DIFFUSION_PIPE",),
                 "image": ("IMAGE",),
                 "seed": ("INT", {"default": 42, "min": 0, "max": 0xffffffffffffffff}),
                 "steps": ("INT", {"default": 30, "min": 1, "max": 100}),
