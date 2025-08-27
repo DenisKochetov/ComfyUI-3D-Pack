@@ -6172,7 +6172,7 @@ import torch
 from mesh_processor import fastglb  # Наша новая библиотека
 from mesh_processor.export_utils import export_to_fastmesh, export_to_mesh
 from mesh_processor.mesh import FastMesh, Mesh
-
+from fastpostprocessors import FastMeshCleaner, fast_reduce_faces
 class Hunyuan3D_21_ShapeGen_Complete:
     """Hunyuan3D-2.1 Shape Generation - ПОЛНАЯ ВЕРСИЯ с FastMesh"""
     
@@ -6180,7 +6180,7 @@ class Hunyuan3D_21_ShapeGen_Complete:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "shapegen_pipe": ("DIFFUSERS_PIPE",),
+                "shapegen_pipe": ("SHAPEGEN_PIPE",),
                 "image": ("IMAGE",),
                 "seed": ("INT", {"default": 42, "min": 0, "max": 0xffffffffffffffff}),
                 "steps": ("INT", {"default": 30, "min": 1, "max": 100}),
@@ -6250,12 +6250,12 @@ class Hunyuan3D_21_ShapeGen_Complete:
             if mesh_out is None:
                 raise Exception("Не удалось создать mesh из пайплайна")
             
-            # Face reduction (собственная реализация)
+            # Fast postprocessing (БЕЗ конвертаций в trimesh/pymeshlab)
             try:
-                print("🔧 не Применяем face reduction...")
-                # mesh_out = self._simple_face_reduction(mesh_out)
+                print("🚀 Применяем БЫСТРЫЙ postprocessing...")
+                mesh_out = fast_reduce_faces(mesh_out, max_faces=200000)
             except Exception as e:
-                print(f"⚠️ Face reduction ошибка: {e}")
+                print(f"⚠️ Fast postprocessing ошибка: {e}")
             
             # Cleanup (БЕЗ перемещения пайплайна на CPU!)
             if auto_cleanup:
@@ -6279,42 +6279,7 @@ class Hunyuan3D_21_ShapeGen_Complete:
             print(f"❌ ShapeGen ошибка: {e}")
             return (None, pils_to_torch_imgs([pil_image]) if 'pil_image' in locals() else torch.zeros((1, 3, 512, 512)))
     
-    def _simple_face_reduction(self, mesh_obj, reduction_factor=0.7):
-        """Простое удаление граней по площади"""
-        try:
-            vertices = mesh_obj.v
-            faces = mesh_obj.f
-            
-            # Вычисляем площади треугольников
-            v0 = vertices[faces[:, 0]]
-            v1 = vertices[faces[:, 1]] 
-            v2 = vertices[faces[:, 2]]
-            
-            edge1 = v1 - v0
-            edge2 = v2 - v0
-            cross_product = torch.cross(edge1, edge2, dim=1)
-            areas = 0.5 * torch.norm(cross_product, dim=1)
-            
-            # Сортируем по площади и оставляем самые большие
-            sorted_indices = torch.argsort(areas, descending=True)
-            keep_count = int(len(sorted_indices) * reduction_factor)
-            keep_faces = sorted_indices[:keep_count]
-            
-            new_faces = faces[keep_faces]
-            mesh_obj.f = new_faces
-            
-            if mesh_obj.fn is not None:
-                mesh_obj.fn = new_faces
-            
-            # Пересчитываем нормали
-            mesh_obj.auto_normal()
-            
-            print(f"Face reduction: {len(faces)} → {len(new_faces)} граней ({reduction_factor*100:.0f}%)")
-            
-        except Exception as e:
-            print(f"Face reduction ошибка: {e}")
-        
-        return mesh_obj
+
 
 
 class Hunyuan3D_21_TexGen_Complete:

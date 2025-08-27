@@ -7,6 +7,7 @@ import numpy as np
 import cv2
 from mesh_processor.export_utils import export_to_fastmesh, export_to_mesh
 from mesh_processor.mesh import FastMesh, Mesh
+from fastpostprocessors import fast_reduce_faces
 
 # Импорты с fallback
 try:
