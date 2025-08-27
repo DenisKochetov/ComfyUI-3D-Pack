@@ -5609,26 +5609,26 @@ class Hunyuan3D_21_ShapeGen:
         
         mesh = export_to_trimesh_2_1(outputs)[0]
         
-        face_reduce_worker = FaceReducer_2_1()
-        mesh = face_reduce_worker(mesh)
-        del face_reduce_worker
+        # face_reduce_worker = FaceReducer_2_1()
+        # mesh = face_reduce_worker(mesh)
+        # del face_reduce_worker
         
         # Auto cleanup pipeline if enabled
-        if auto_cleanup:
-            try:
-                shapegen_pipe.to('cpu')
-                if hasattr(shapegen_pipe, 'unet'):
-                    del shapegen_pipe.unet
-                if hasattr(shapegen_pipe, 'vae'):
-                    del shapegen_pipe.vae
-                if hasattr(shapegen_pipe, 'scheduler'):
-                    del shapegen_pipe.scheduler
-                del outputs
-                torch.cuda.empty_cache()
-                gc.collect()
-                print("Shape pipeline cleaned up")
-            except Exception as e:
-                print(f"Error during pipeline cleanup: {e}")
+        # if auto_cleanup:
+        #     try:
+        #         shapegen_pipe.to('cpu')
+        #         if hasattr(shapegen_pipe, 'unet'):
+        #             del shapegen_pipe.unet
+        #         if hasattr(shapegen_pipe, 'vae'):
+        #             del shapegen_pipe.vae
+        #         if hasattr(shapegen_pipe, 'scheduler'):
+        #             del shapegen_pipe.scheduler
+        #         del outputs
+        #         torch.cuda.empty_cache()
+        #         gc.collect()
+        #         print("Shape pipeline cleaned up")
+        #     except Exception as e:
+        #         print(f"Error during pipeline cleanup: {e}")
             
         mesh_out = Mesh.load_trimesh(given_mesh=mesh)
         mesh_out.auto_normal()
