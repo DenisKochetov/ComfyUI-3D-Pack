@@ -6637,15 +6637,4 @@ class FastMesh_Utilities:
         )
 
 
-# # Mapping для ComfyUI
-# NODE_CLASS_MAPPINGS = {
-#     "Hunyuan3D_21_ShapeGen_Complete": Hunyuan3D_21_ShapeGen_Complete,
-#     "Hunyuan3D_21_TexGen_Complete": Hunyuan3D_21_TexGen_Complete,
-#     "FastMesh_Utilities": FastMesh_Utilities,
-# }
-
-# NODE_DISPLAY_NAME_MAPPINGS = {
-#     "Hunyuan3D_21_ShapeGen_Complete": "Hunyuan3D 2.1 ShapeGen (FastMesh)",
-#     "Hunyuan3D_21_TexGen_Complete": "Hunyuan3D 2.1 TexGen (FastMesh)",
-#     "FastMesh_Utilities": "FastMesh Utilities",
-# }
+# Mapping для ComfyUI - Complete FastMesh ноды уже определены выше в nodes.py, не нужны отдельные mappings
