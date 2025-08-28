@@ -129,6 +129,14 @@ from Gen_3D_Modules.PartCrafter.partcrafter_src.utils.data_utils import get_colo
 from Gen_3D_Modules.PartCrafter.partcrafter_src.utils.render_utils import explode_mesh
 import zipfile
 
+import os
+import gc
+import torch
+from mesh_processor import fastglb  # Наша новая библиотека
+from mesh_processor.export_utils import export_to_fastmesh, export_to_mesh
+from mesh_processor.mesh import FastMesh, Mesh
+from fastpostprocessors import FastMeshCleaner, fast_reduce_faces
+
 
 os.environ['SPCONV_ALGO'] = 'native'
 
@@ -6165,13 +6173,8 @@ class PartCrafter_Generate:
 # Hunyuan3D-2.1 с FastGLB вместо trimesh
 #------------   hunhunhun ------------
 
-import os
-import gc
-import torch
-from mesh_processor import fastglb  # Наша новая библиотека
-from mesh_processor.export_utils import export_to_fastmesh, export_to_mesh
-from mesh_processor.mesh import FastMesh, Mesh
-from fastpostprocessors import FastMeshCleaner, fast_reduce_faces
+
+
 class Hunyuan3D_21_ShapeGen_Complete:
     """Hunyuan3D-2.1 Shape Generation - ПОЛНАЯ ВЕРСИЯ с FastMesh"""
     
