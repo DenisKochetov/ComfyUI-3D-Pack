@@ -5,18 +5,24 @@ import torch
 import numpy as np
 from typing import Union
 from mesh_processor.mesh import Mesh, FastMesh
-from advanced_mesh_simplifier import advanced_reduce_faces, AdvancedFaceReducer
+from pymeshlab_wrapper import (
+    pymeshlab_reduce_faces, 
+    pymeshlab_remove_floaters, 
+    pymeshlab_remove_degenerates,
+    pymeshlab_clean_mesh,
+    PyMeshLabFaceReducer
+)
 
 
-def fast_reduce_faces(mesh_obj: Union[Mesh, FastMesh], max_faces: int = 200000, 
-                     use_advanced: bool = True) -> Union[Mesh, FastMesh]:
+def fast_reduce_faces(mesh_obj: Union[Mesh, FastMesh], max_faces: int = 40000, 
+                     use_pymeshlab: bool = True) -> Union[Mesh, FastMesh]:
     """
     Уменьшение количества граней до заданного максимума
     
     Args:
         mesh_obj: FastMesh или Mesh объект
         max_faces: максимальное количество граней (аналог max_facenum в оригинале)
-        use_advanced: использовать продвинутый алгоритм Quadric Edge Collapse
+        use_pymeshlab: использовать проверенный pymeshlab алгоритм (рекомендуется)
     
     Returns:
         Тот же тип mesh объекта с уменьшенным количеством граней
@@ -32,12 +38,12 @@ def fast_reduce_faces(mesh_obj: Union[Mesh, FastMesh], max_faces: int = 200000,
             print(f"[FastPostprocessor] Mesh already has {faces.shape[0]} faces (target: {max_faces})")
             return mesh_obj
         
-        if use_advanced:
-            # Используем продвинутый алгоритм Quadric Edge Collapse
-            print(f"[FastPostprocessor] Используем Quadric Edge Collapse: {faces.shape[0]} → {max_faces}")
-            mesh_obj = advanced_reduce_faces(mesh_obj, max_faces)
+        if use_pymeshlab:
+            # Используем проверенный pymeshlab алгоритм (как в оригинале)
+            print(f"[FastPostprocessor] Используем PyMeshLab: {faces.shape[0]} → {max_faces}")
+            mesh_obj = pymeshlab_reduce_faces(mesh_obj, max_faces)
         else:
-            # Используем простой алгоритм по площади (старый)
+            # Используем простой алгоритм по площади (fallback)
             print(f"[FastPostprocessor] Используем простое удаление по площади: {faces.shape[0]} → {max_faces}")
             mesh_obj = _simple_area_reduction(mesh_obj, max_faces)
         
@@ -84,44 +90,50 @@ def _simple_area_reduction(mesh_obj: Union[Mesh, FastMesh], max_faces: int) -> U
     return mesh_obj
 
 
-def fast_remove_small_components(mesh_obj: Union[Mesh, FastMesh], min_component_ratio: float = 0.01) -> Union[Mesh, FastMesh]:
+def fast_remove_small_components(mesh_obj: Union[Mesh, FastMesh], min_component_ratio: float = 0.005, 
+                                use_pymeshlab: bool = True) -> Union[Mesh, FastMesh]:
     """
     Удаление мелких несвязанных компонентов
     
     Args:
         mesh_obj: FastMesh или Mesh объект
         min_component_ratio: минимальный размер компонента относительно общего числа граней
+        use_pymeshlab: использовать проверенный pymeshlab алгоритм
     
     Returns:
         Mesh объект без мелких компонентов
     """
     try:
-        vertices = mesh_obj.v
-        faces = mesh_obj.f
-        
-        if faces.shape[0] == 0:
-            return mesh_obj
-        
-        # Простой алгоритм: удаляем грани с вершинами далеко от центра масс
-        face_centers = (vertices[faces[:, 0]] + vertices[faces[:, 1]] + vertices[faces[:, 2]]) / 3.0
-        mesh_center = face_centers.mean(dim=0)
-        
-        # Расстояния от центра
-        distances = torch.norm(face_centers - mesh_center, dim=1)
-        distance_threshold = torch.quantile(distances, 0.9)  # Убираем 10% самых дальних
-        
-        keep_mask = distances <= distance_threshold
-        new_faces = faces[keep_mask]
-        
-        mesh_obj.f = new_faces
-        if mesh_obj.fn is not None:
-            mesh_obj.fn = new_faces
+        if use_pymeshlab:
+            return pymeshlab_remove_floaters(mesh_obj, min_component_ratio)
+        else:
+            # Простой fallback алгоритм
+            vertices = mesh_obj.v
+            faces = mesh_obj.f
             
-        # Пересчитываем нормали
-        mesh_obj.auto_normal()
-        
-        removed_count = len(faces) - len(new_faces)
-        print(f"[FastPostprocessor] Removed small components: {removed_count} граней")
+            if faces.shape[0] == 0:
+                return mesh_obj
+            
+            # Простой алгоритм: удаляем грани с вершинами далеко от центра масс
+            face_centers = (vertices[faces[:, 0]] + vertices[faces[:, 1]] + vertices[faces[:, 2]]) / 3.0
+            mesh_center = face_centers.mean(dim=0)
+            
+            # Расстояния от центра
+            distances = torch.norm(face_centers - mesh_center, dim=1)
+            distance_threshold = torch.quantile(distances, 0.9)  # Убираем 10% самых дальних
+            
+            keep_mask = distances <= distance_threshold
+            new_faces = faces[keep_mask]
+            
+            mesh_obj.f = new_faces
+            if mesh_obj.fn is not None:
+                mesh_obj.fn = new_faces
+                
+            # Пересчитываем нормали
+            mesh_obj.auto_normal()
+            
+            removed_count = len(faces) - len(new_faces)
+            print(f"[FastPostprocessor] Removed small components: {removed_count} граней")
         
     except Exception as e:
         print(f"[FastPostprocessor] Small components removal ошибка: {e}")
@@ -129,47 +141,53 @@ def fast_remove_small_components(mesh_obj: Union[Mesh, FastMesh], min_component_
     return mesh_obj
 
 
-def fast_remove_degenerate_faces(mesh_obj: Union[Mesh, FastMesh], area_threshold: float = 1e-8) -> Union[Mesh, FastMesh]:
+def fast_remove_degenerate_faces(mesh_obj: Union[Mesh, FastMesh], area_threshold: float = 1e-8,
+                                 use_pymeshlab: bool = True) -> Union[Mesh, FastMesh]:
     """
     Удаление вырожденных граней (с очень маленькой площадью)
     
     Args:
         mesh_obj: FastMesh или Mesh объект
         area_threshold: минимальная площадь грани
+        use_pymeshlab: использовать проверенный pymeshlab алгоритм
     
     Returns:
         Mesh объект без вырожденных граней
     """
     try:
-        vertices = mesh_obj.v
-        faces = mesh_obj.f
-        
-        if faces.shape[0] == 0:
-            return mesh_obj
-        
-        # Вычисляем площади треугольников
-        v0 = vertices[faces[:, 0]]
-        v1 = vertices[faces[:, 1]] 
-        v2 = vertices[faces[:, 2]]
-        
-        edge1 = v1 - v0
-        edge2 = v2 - v0
-        cross_product = torch.cross(edge1, edge2, dim=1)
-        areas = 0.5 * torch.norm(cross_product, dim=1)
-        
-        # Оставляем только грани с достаточной площадью
-        valid_mask = areas > area_threshold
-        new_faces = faces[valid_mask]
-        
-        mesh_obj.f = new_faces
-        if mesh_obj.fn is not None:
-            mesh_obj.fn = new_faces
+        if use_pymeshlab:
+            return pymeshlab_remove_degenerates(mesh_obj)
+        else:
+            # Простой fallback алгоритм
+            vertices = mesh_obj.v
+            faces = mesh_obj.f
             
-        # Пересчитываем нормали
-        mesh_obj.auto_normal()
-        
-        removed_count = len(faces) - len(new_faces)
-        print(f"[FastPostprocessor] Removed degenerate faces: {removed_count} граней")
+            if faces.shape[0] == 0:
+                return mesh_obj
+            
+            # Вычисляем площади треугольников
+            v0 = vertices[faces[:, 0]]
+            v1 = vertices[faces[:, 1]] 
+            v2 = vertices[faces[:, 2]]
+            
+            edge1 = v1 - v0
+            edge2 = v2 - v0
+            cross_product = torch.cross(edge1, edge2, dim=1)
+            areas = 0.5 * torch.norm(cross_product, dim=1)
+            
+            # Оставляем только грани с достаточной площадью
+            valid_mask = areas > area_threshold
+            new_faces = faces[valid_mask]
+            
+            mesh_obj.f = new_faces
+            if mesh_obj.fn is not None:
+                mesh_obj.fn = new_faces
+                
+            # Пересчитываем нормали
+            mesh_obj.auto_normal()
+            
+            removed_count = len(faces) - len(new_faces)
+            print(f"[FastPostprocessor] Removed degenerate faces: {removed_count} граней")
         
     except Exception as e:
         print(f"[FastPostprocessor] Degenerate faces removal ошибка: {e}")
@@ -214,47 +232,45 @@ def fast_normalize_mesh(mesh_obj: Union[Mesh, FastMesh], scale_factor: float = 1
     return mesh_obj
 
 
-def fast_clean_mesh(mesh_obj: Union[Mesh, FastMesh]) -> Union[Mesh, FastMesh]:
+def fast_clean_mesh(mesh_obj: Union[Mesh, FastMesh], use_pymeshlab: bool = True) -> Union[Mesh, FastMesh]:
     """
     Комплексная очистка меша - все операции сразу
     
     Args:
         mesh_obj: FastMesh или Mesh объект
+        use_pymeshlab: использовать проверенные pymeshlab алгоритмы
     
     Returns:
         Очищенный mesh объект
     """
-    print("[FastPostprocessor] Начинаем комплексную очистку меша...")
-    
-    # 1. Удаляем вырожденные грани
-    mesh_obj = fast_remove_degenerate_faces(mesh_obj)
-    
-    # 2. Удаляем мелкие компоненты
-    mesh_obj = fast_remove_small_components(mesh_obj)
-    
-    # 3. Нормализуем
-    mesh_obj = fast_normalize_mesh(mesh_obj)
-    
-    print("[FastPostprocessor] Комплексная очистка завершена")
-    return mesh_obj
+    if use_pymeshlab:
+        print("[FastPostprocessor] Комплексная очистка через PyMeshLab...")
+        return pymeshlab_clean_mesh(mesh_obj, max_faces=0, remove_floaters=True, remove_degenerates=True)
+    else:
+        print("[FastPostprocessor] Комплексная очистка (простые алгоритмы)...")
+        
+        # 1. Удаляем вырожденные грани
+        mesh_obj = fast_remove_degenerate_faces(mesh_obj, use_pymeshlab=False)
+        
+        # 2. Удаляем мелкие компоненты
+        mesh_obj = fast_remove_small_components(mesh_obj, use_pymeshlab=False)
+        
+        # 3. Нормализуем
+        mesh_obj = fast_normalize_mesh(mesh_obj)
+        
+        print("[FastPostprocessor] Комплексная очистка завершена")
+        return mesh_obj
 
 
 class FastFaceReducer:
     """Класс для уменьшения граней - аналог FaceReducer"""
     
-    def __init__(self, max_faces: int = 200000, use_advanced: bool = True, 
-                 preserve_boundary: bool = True, preserve_topology: bool = True):
+    def __init__(self, max_faces: int = 40000, use_pymeshlab: bool = True):
         self.max_faces = max_faces
-        self.use_advanced = use_advanced
-        self.preserve_boundary = preserve_boundary
-        self.preserve_topology = preserve_topology
+        self.use_pymeshlab = use_pymeshlab
     
     def __call__(self, mesh_obj: Union[Mesh, FastMesh]) -> Union[Mesh, FastMesh]:
-        if self.use_advanced:
-            return advanced_reduce_faces(mesh_obj, self.max_faces, 
-                                       self.preserve_boundary, self.preserve_topology)
-        else:
-            return fast_reduce_faces(mesh_obj, self.max_faces, use_advanced=False)
+        return fast_reduce_faces(mesh_obj, self.max_faces, use_pymeshlab=self.use_pymeshlab)
 
 
 class FastFloaterRemover:
@@ -281,7 +297,7 @@ class FastMeshCleaner:
     """Комплексная очистка меша - все операции сразу"""
     
     def __init__(self, 
-                 max_faces: int = 200000,
+                 max_faces: int = 40000,
                  remove_degenerates: bool = True,
                  remove_floaters: bool = True,
                  normalize: bool = True):
@@ -312,7 +328,7 @@ class FastMeshCleaner:
 # Простые функции для быстрого использования
 def process_mesh_fast(mesh_obj: Union[Mesh, FastMesh], 
                      reduce_faces: bool = True,
-                     max_faces: int = 200000) -> Union[Mesh, FastMesh]:
+                     max_faces: int = 40000) -> Union[Mesh, FastMesh]:
     """
     Быстрая обработка меша одной функцией
     

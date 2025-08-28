@@ -6179,7 +6179,7 @@ class Hunyuan3D_21_ShapeGen_Complete:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "shapegen_pipe": ("DIFFUSERS_PIPE",),
+                "shapegen_pipe": ("SHAPEGEN_PIPE",),
                 "image": ("IMAGE",),
                 "seed": ("INT", {"default": 42, "min": 0, "max": 0xffffffffffffffff}),
                 "steps": ("INT", {"default": 30, "min": 1, "max": 100}),
@@ -6252,7 +6252,7 @@ class Hunyuan3D_21_ShapeGen_Complete:
             # Fast postprocessing (БЕЗ конвертаций в trimesh/pymeshlab)
             try:
                 print("🚀 Применяем БЫСТРЫЙ postprocessing...")
-                mesh_out = fast_reduce_faces(mesh_out, max_faces=200000, use_advanced=True)
+                mesh_out = fast_reduce_faces(mesh_out, max_faces=40000)
             except Exception as e:
                 print(f"⚠️ Fast postprocessing ошибка: {e}")
             
