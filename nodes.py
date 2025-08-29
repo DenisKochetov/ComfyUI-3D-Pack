@@ -136,7 +136,7 @@ from mesh_processor import fastglb  # Наша новая библиотека
 from mesh_processor.export_utils import export_to_fastmesh, export_to_mesh
 from mesh_processor.mesh import FastMesh, Mesh
 from fastpostprocessors import FastMeshCleaner, fast_reduce_faces
-
+from typing import Union
 
 os.environ['SPCONV_ALGO'] = 'native'
 
@@ -5570,6 +5570,9 @@ class Load_Hunyuan3D_21_TexGen_Pipeline:
         print(f"[TexGen-Loader] Cached new pipeline {cache_key}")
         return (pipeline,)
 
+import time
+
+# HUN ORIGINAL START
 class Hunyuan3D_21_ShapeGen:
     """Hunyuan3D-2.1 Shape Generation with automatic pipeline cleanup"""
     
@@ -5595,16 +5598,26 @@ class Hunyuan3D_21_ShapeGen:
 
     @torch.no_grad()
     def generate(self, shapegen_pipe, image, seed, steps, guidance_scale, octree_resolution, remove_background, auto_cleanup):
+        total_start = time.time()
+        print(f"🏁 Начинаем ОРИГИНАЛЬНЫЙ цикл ShapeGen (с trimesh)...")
+        
+        # Background removal
+        bg_start = time.time()
         pil_image = torch_imgs_to_pils(image)[0].convert("RGBA")
         
         if remove_background or pil_image.mode == "RGB":
             rmbg_worker = BackgroundRemover_2_1()
             pil_image = rmbg_worker(pil_image.convert('RGB'))
             del rmbg_worker
+        bg_time = time.time() - bg_start
+        print(f"⏱️ Background removal: {bg_time:.3f}с")
 
+        # Генерация
         generator = torch.Generator(device=shapegen_pipe.device)
         generator = generator.manual_seed(int(seed))
         
+        print(f"🚀 Запуск ОРИГИНАЛЬНОГО ShapeGen: {steps} шагов, guidance={guidance_scale}")
+        generation_start = time.time()
         outputs = shapegen_pipe(
             image=pil_image,
             num_inference_steps=steps,
@@ -5614,33 +5627,49 @@ class Hunyuan3D_21_ShapeGen:
             num_chunks=200000,
             output_type='mesh'
         )
+        generation_time = time.time() - generation_start
+        print(f"⏱️ ShapeGen время генерации: {generation_time:.2f}с")
         
+        # Экспорт в trimesh
+        export_start = time.time()
         mesh = export_to_trimesh_2_1(outputs)[0]
+        export_time = time.time() - export_start
+        print(f"⏱️ Экспорт в trimesh: {export_time:.2f}с")
+        
+        # Face reduction (если включен)
         if auto_cleanup:
+            faces_before = len(mesh.faces)
+            reduction_start = time.time()
             face_reduce_worker = FaceReducer_2_1()
             mesh = face_reduce_worker(mesh)
             del face_reduce_worker
+            reduction_time = time.time() - reduction_start
+            faces_after = len(mesh.faces)
+            reduction_ratio = ((faces_before - faces_after) / faces_before) * 100 if faces_before > 0 else 0
+            print(f"⏱️ ОРИГИНАЛЬНЫЙ Face reduction: {faces_before} → {faces_after} граней (-{reduction_ratio:.1f}%) за {reduction_time:.2f}с")
+        else:
+            reduction_time = 0
         
-        # if auto_cleanup:
-        #     try:
-        #         shapegen_pipe.to('cpu')
-        #         if hasattr(shapegen_pipe, 'unet'):
-        #             del shapegen_pipe.unet
-        #         if hasattr(shapegen_pipe, 'vae'):
-        #             del shapegen_pipe.vae
-        #         if hasattr(shapegen_pipe, 'scheduler'):
-        #             del shapegen_pipe.scheduler
-        #         del outputs
-        #         torch.cuda.empty_cache()
-        #         gc.collect()
-        #         print("Shape pipeline cleaned up")
-        #     except Exception as e:
-        #         print(f"Error during pipeline cleanup: {e}")
-            
+        # Конвертация trimesh → Mesh  
+        convert_start = time.time()
         mesh_out = Mesh.load_trimesh(given_mesh=mesh)
         mesh_out.auto_normal()
+        convert_time = time.time() - convert_start
+        print(f"⏱️ Конвертация trimesh → Mesh: {convert_time:.3f}с")
         
         processed_image_tensor = pils_to_torch_imgs([pil_image])
+        
+        # Итоговая сводка
+        total_time = time.time() - total_start
+        print(f"🏆 ИТОГОВАЯ СВОДКА (ОРИГИНАЛЬНЫЙ):")
+        print(f"  📊 Результат: {mesh_out.v.shape[0]} вершин, {mesh_out.f.shape[0]} граней")
+        print(f"  ⏱️ ОБЩЕЕ ВРЕМЯ: {total_time:.2f}с")
+        print(f"  🔹 Background removal: {bg_time:.3f}с ({bg_time/total_time*100:.1f}%)")
+        print(f"  🔹 Генерация: {generation_time:.2f}с ({generation_time/total_time*100:.1f}%)")
+        print(f"  🔹 Экспорт в trimesh: {export_time:.2f}с ({export_time/total_time*100:.1f}%)")
+        if auto_cleanup:
+            print(f"  🔹 Face reduction: {reduction_time:.2f}с ({reduction_time/total_time*100:.1f}%)")
+        print(f"  🔹 Конвертация → Mesh: {convert_time:.3f}с ({convert_time/total_time*100:.1f}%)")
         
         return (mesh_out, processed_image_tensor)
 
@@ -6204,6 +6233,8 @@ class Hunyuan3D_21_ShapeGen_Complete:
     def generate(self, shapegen_pipe, image, seed, steps, guidance_scale, octree_resolution, output_fastmesh, remove_background, auto_cleanup, keep_pipeline_on_gpu):
         
         try:
+            total_start = time.time()
+            print(f"🏁 Начинаем полный цикл ShapeGen...")
             # Подготовка изображения
             pil_image = torch_imgs_to_pils(image)[0]
             
@@ -6221,6 +6252,7 @@ class Hunyuan3D_21_ShapeGen_Complete:
             generator = torch.Generator(device=shapegen_pipe.device).manual_seed(seed)
             
             print(f"🚀 Запуск ShapeGen: {steps} шагов, guidance={guidance_scale}")
+            generation_start = time.time()
             outputs = shapegen_pipe(
                 image=pil_image,
                 num_inference_steps=steps,
@@ -6230,24 +6262,37 @@ class Hunyuan3D_21_ShapeGen_Complete:
                 num_chunks=200000,
                 output_type='mesh'
             )
+            generation_time = time.time() - generation_start
+            print(f"⏱️ ShapeGen время генерации: {generation_time:.2f}с")
             
             # ПРЯМОЙ экспорт из пайплайна в наши объекты!
             print("🎯 ПРЯМОЙ экспорт из пайплайна (БЕЗ trimesh)...")
+            export_start = time.time()
             
             if output_fastmesh:
+                export_type_start = time.time()
                 mesh_objects = export_to_fastmesh(outputs)
                 mesh_out = mesh_objects[0] if isinstance(mesh_objects, list) else mesh_objects
-                print("✅ FastMesh создан напрямую из пайплайна!")
+                export_type_time = time.time() - export_type_start
+                print(f"✅ FastMesh создан напрямую из пайплайна! ({export_type_time:.2f}с)")
             else:
+                export_type_start = time.time()
                 mesh_objects = export_to_mesh(outputs)
                 mesh_out = mesh_objects[0] if isinstance(mesh_objects, list) else mesh_objects
-                print("✅ Стандартный Mesh создан напрямую из пайплайна!")
+                export_type_time = time.time() - export_type_start
+                print(f"✅ Стандартный Mesh создан напрямую из пайплайна! ({export_type_time:.2f}с)")
                 
                 # Дополняем нормали и текстуру если нужно (БЫСТРО)
+                post_start = time.time()
                 if mesh_out.vn is None:
                     mesh_out.auto_normal()
                 if mesh_out.albedo is None:
                     mesh_out._create_empty_albedo_fast()
+                post_time = time.time() - post_start
+                print(f"⚡ Постобработка меша: {post_time:.3f}с")
+            
+            export_time = time.time() - export_start
+            print(f"⏱️ Общее время экспорта: {export_time:.2f}с")
             
             if mesh_out is None:
                 raise Exception("Не удалось создать mesh из пайплайна")
@@ -6255,26 +6300,40 @@ class Hunyuan3D_21_ShapeGen_Complete:
             # Оригинальный postprocessing адаптированный для FastMesh/Mesh
             try:
                 print("🔄 Применяем ОРИГИНАЛЬНЫЙ postprocessing (адаптированный)...")
+                reduction_start = time.time()
                 mesh_out = self._apply_original_face_reducer(mesh_out, max_faces=40000)
+                reduction_time = time.time() - reduction_start
+                print(f"⏱️ Face reduction время: {reduction_time:.2f}с")
             except Exception as e:
                 print(f"⚠️ Postprocessing ошибка: {e}")
             
             # Cleanup (БЕЗ перемещения пайплайна на CPU!)
             if auto_cleanup:
                 try:
+                    cleanup_start = time.time()
                     # НЕ перемещаем пайплайн на CPU - это вызывает проблемы!
                     # shapegen_pipe.to('cpu')  # УБРАНО!
                     
                     # Только очищаем кэш GPU
                     torch.cuda.empty_cache()
                     gc.collect()
-                    print("✅ Cleanup завершен (пайплайн остался на GPU)")
+                    cleanup_time = time.time() - cleanup_start
+                    print(f"✅ Cleanup завершен (пайплайн остался на GPU) - {cleanup_time:.3f}с")
                 except Exception as e:
                     print(f"⚠️ Cleanup ошибка: {e}")
             
             processed_image_tensor = pils_to_torch_imgs([pil_image])
             
-            print(f"✅ ShapeGen завершен: {mesh_out.v.shape[0]} вершин, {mesh_out.f.shape[0]} граней")
+            total_time = time.time() - total_start
+            print(f"🏆 ИТОГОВАЯ СВОДКА:")
+            print(f"  📊 Результат: {mesh_out.v.shape[0]} вершин, {mesh_out.f.shape[0]} граней")
+            print(f"  ⏱️ ОБЩЕЕ ВРЕМЯ: {total_time:.2f}с")
+            print(f"  🔹 Генерация: {generation_time:.2f}с ({generation_time/total_time*100:.1f}%)")
+            print(f"  🔹 Экспорт: {export_time:.2f}с ({export_time/total_time*100:.1f}%)")
+            if 'reduction_time' in locals():
+                print(f"  🔹 Face reduction: {reduction_time:.2f}с ({reduction_time/total_time*100:.1f}%)")
+            if 'cleanup_time' in locals():
+                print(f"  🔹 Cleanup: {cleanup_time:.3f}с ({cleanup_time/total_time*100:.1f}%)")
             return (mesh_out, processed_image_tensor)
             
         except Exception as e:
@@ -6290,14 +6349,16 @@ class Hunyuan3D_21_ShapeGen_Complete:
             # Используем наш PyMeshLab wrapper вместо оригинального trimesh подхода
             from pymeshlab_wrapper import pymeshlab_reduce_faces
             
-            print(f"🔄 Reducing faces from {mesh_obj.f.shape[0]} to max {max_faces}...")
+            faces_before = mesh_obj.f.shape[0]
+            print(f"🔄 Reducing faces from {faces_before} to max {max_faces}...")
             
             # Если граней уже меньше максимума - не трогаем
-            if mesh_obj.f.shape[0] <= max_faces:
-                print(f"✅ Mesh уже содержит {mesh_obj.f.shape[0]} граней (≤ {max_faces})")
+            if faces_before <= max_faces:
+                print(f"✅ Mesh уже содержит {faces_before} граней (≤ {max_faces}) - пропускаем")
                 return mesh_obj
             
             # Применяем оригинальный алгоритм через PyMeshLab
+            algo_start = time.time()
             reduced_mesh = pymeshlab_reduce_faces(
                 mesh_obj, 
                 max_faces=max_faces,
@@ -6308,14 +6369,16 @@ class Hunyuan3D_21_ShapeGen_Complete:
                 preserve_topology=True,
                 autoclean=True
             )
+            algo_time = time.time() - algo_start
             
-            print(f"✅ Face reduction: {mesh_obj.f.shape[0]} → {reduced_mesh.f.shape[0]} граней")
+            faces_after = reduced_mesh.f.shape[0]
+            reduction_ratio = ((faces_before - faces_after) / faces_before) * 100
+            print(f"✅ Face reduction: {faces_before} → {faces_after} граней (-{reduction_ratio:.1f}%) за {algo_time:.2f}с")
             return reduced_mesh
             
         except Exception as e:
             print(f"⚠️ Original face reducer error: {e}, возвращаем исходный mesh")
             return mesh_obj
-    
 
 
 class Hunyuan3D_21_TexGen_Complete:
