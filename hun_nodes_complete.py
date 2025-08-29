@@ -5,6 +5,7 @@ import gc
 import torch
 import numpy as np
 import cv2
+from typing import Union
 from mesh_processor.export_utils import export_to_fastmesh, export_to_mesh
 from mesh_processor.mesh import FastMesh, Mesh
 from fastpostprocessors import FastMeshCleaner, fast_reduce_faces
@@ -27,7 +28,7 @@ class Hunyuan3D_21_ShapeGen_Complete:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "shapegen_pipe": ("SHAPEGEN_PIPE",),
+                "shapegen_pipe": ("DIFFUSERS_PIPE",),
                 "image": ("IMAGE",),
                 "seed": ("INT", {"default": 42, "min": 0, "max": 0xffffffffffffffff}),
                 "steps": ("INT", {"default": 30, "min": 1, "max": 100}),
@@ -97,12 +98,12 @@ class Hunyuan3D_21_ShapeGen_Complete:
             if mesh_out is None:
                 raise Exception("Не удалось создать mesh из пайплайна")
             
-            # Fast postprocessing (БЕЗ конвертаций в trimesh/pymeshlab)
+            # Оригинальный postprocessing адаптированный для FastMesh/Mesh
             try:
-                print("🚀 Применяем БЫСТРЫЙ postprocessing...")
-                mesh_out = fast_reduce_faces(mesh_out, max_faces=40000)
+                print("🔄 Применяем ОРИГИНАЛЬНЫЙ postprocessing (адаптированный)...")
+                mesh_out = self._apply_original_face_reducer(mesh_out, max_faces=40000)
             except Exception as e:
-                print(f"⚠️ Fast postprocessing ошибка: {e}")
+                print(f"⚠️ Postprocessing ошибка: {e}")
             
             # Cleanup (БЕЗ перемещения пайплайна на CPU!)
             if auto_cleanup:
@@ -125,6 +126,41 @@ class Hunyuan3D_21_ShapeGen_Complete:
         except Exception as e:
             print(f"❌ ShapeGen ошибка: {e}")
             return (None, pils_to_torch_imgs([pil_image]) if 'pil_image' in locals() else torch.zeros((1, 3, 512, 512)))
+    
+    def _apply_original_face_reducer(self, mesh_obj: Union[Mesh, FastMesh], max_faces: int = 40000) -> Union[Mesh, FastMesh]:
+        """
+        Применяет оригинальный FaceReducer алгоритм, но БЕЗ trimesh зависимости
+        Использует PyMeshLab через наш wrapper
+        """
+        try:
+            # Используем наш PyMeshLab wrapper вместо оригинального trimesh подхода
+            from pymeshlab_wrapper import pymeshlab_reduce_faces
+            
+            print(f"🔄 Reducing faces from {mesh_obj.f.shape[0]} to max {max_faces}...")
+            
+            # Если граней уже меньше максимума - не трогаем
+            if mesh_obj.f.shape[0] <= max_faces:
+                print(f"✅ Mesh уже содержит {mesh_obj.f.shape[0]} граней (≤ {max_faces})")
+                return mesh_obj
+            
+            # Применяем оригинальный алгоритм через PyMeshLab
+            reduced_mesh = pymeshlab_reduce_faces(
+                mesh_obj, 
+                max_faces=max_faces,
+                quality_threshold=1.0,
+                preserve_boundary=True,
+                boundary_weight=3,
+                preserve_normal=True,
+                preserve_topology=True,
+                autoclean=True
+            )
+            
+            print(f"✅ Face reduction: {mesh_obj.f.shape[0]} → {reduced_mesh.f.shape[0]} граней")
+            return reduced_mesh
+            
+        except Exception as e:
+            print(f"⚠️ Original face reducer error: {e}, возвращаем исходный mesh")
+            return mesh_obj
     
 
 
@@ -481,6 +517,80 @@ class FastMesh_Utilities:
             device=mesh.device
         )
 
+
+class Hunyuan3D_21_ShapeGen:
+    """Hunyuan3D-2.1 Shape Generation with automatic pipeline cleanup"""
+    
+    CATEGORY = "Comfy3D/Algorithm/Hunyuan3D-2.1"
+    RETURN_TYPES = ("MESH", "IMAGE")
+    RETURN_NAMES = ("mesh", "processed_image")
+    FUNCTION = "generate"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "shapegen_pipe": ("DIFFUSERS_PIPE",),
+                "image": ("IMAGE",),
+                "seed": ("INT", {"default": 1234, "min": 0, "max": 0xffffffffffffffff}),
+                "steps": ("INT", {"default": 30, "min": 1, "max": 100}),
+                "guidance_scale": ("FLOAT", {"default": 7.5, "min": 0.0, "step": 0.1}),
+                "octree_resolution": ("INT", {"default": 256, "min": 64, "max": 512}),
+                "remove_background": ("BOOLEAN", {"default": True}),
+                "auto_cleanup": ("BOOLEAN", {"default": True}),
+            }
+        }
+
+    @torch.no_grad()
+    def generate(self, shapegen_pipe, image, seed, steps, guidance_scale, octree_resolution, remove_background, auto_cleanup):
+        pil_image = torch_imgs_to_pils(image)[0].convert("RGBA")
+        
+        if remove_background or pil_image.mode == "RGB":
+            rmbg_worker = BackgroundRemover_2_1()
+            pil_image = rmbg_worker(pil_image.convert('RGB'))
+            del rmbg_worker
+
+        generator = torch.Generator(device=shapegen_pipe.device)
+        generator = generator.manual_seed(int(seed))
+        
+        outputs = shapegen_pipe(
+            image=pil_image,
+            num_inference_steps=steps,
+            guidance_scale=guidance_scale,
+            generator=generator,
+            octree_resolution=octree_resolution,
+            num_chunks=200000,
+            output_type='mesh'
+        )
+        
+        mesh = export_to_trimesh_2_1(outputs)[0]
+        if auto_cleanup:
+            face_reduce_worker = FaceReducer_2_1()
+            mesh = face_reduce_worker(mesh)
+            del face_reduce_worker
+        
+        # if auto_cleanup:
+        #     try:
+        #         shapegen_pipe.to('cpu')
+        #         if hasattr(shapegen_pipe, 'unet'):
+        #             del shapegen_pipe.unet
+        #         if hasattr(shapegen_pipe, 'vae'):
+        #             del shapegen_pipe.vae
+        #         if hasattr(shapegen_pipe, 'scheduler'):
+        #             del shapegen_pipe.scheduler
+        #         del outputs
+        #         torch.cuda.empty_cache()
+        #         gc.collect()
+        #         print("Shape pipeline cleaned up")
+        #     except Exception as e:
+        #         print(f"Error during pipeline cleanup: {e}")
+            
+        mesh_out = Mesh.load_trimesh(given_mesh=mesh)
+        mesh_out.auto_normal()
+        
+        processed_image_tensor = pils_to_torch_imgs([pil_image])
+        
+        return (mesh_out, processed_image_tensor)
 
 # # Mapping для ComfyUI
 # NODE_CLASS_MAPPINGS = {

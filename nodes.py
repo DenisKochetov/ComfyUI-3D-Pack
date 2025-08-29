@@ -6252,12 +6252,12 @@ class Hunyuan3D_21_ShapeGen_Complete:
             if mesh_out is None:
                 raise Exception("Не удалось создать mesh из пайплайна")
             
-            # Fast postprocessing (БЕЗ конвертаций в trimesh/pymeshlab)
+            # Оригинальный postprocessing адаптированный для FastMesh/Mesh
             try:
-                print("🚀 Применяем БЫСТРЫЙ postprocessing...")
-                mesh_out = fast_reduce_faces(mesh_out, max_faces=40000)
+                print("🔄 Применяем ОРИГИНАЛЬНЫЙ postprocessing (адаптированный)...")
+                mesh_out = self._apply_original_face_reducer(mesh_out, max_faces=40000)
             except Exception as e:
-                print(f"⚠️ Fast postprocessing ошибка: {e}")
+                print(f"⚠️ Postprocessing ошибка: {e}")
             
             # Cleanup (БЕЗ перемещения пайплайна на CPU!)
             if auto_cleanup:
@@ -6281,7 +6281,41 @@ class Hunyuan3D_21_ShapeGen_Complete:
             print(f"❌ ShapeGen ошибка: {e}")
             return (None, pils_to_torch_imgs([pil_image]) if 'pil_image' in locals() else torch.zeros((1, 3, 512, 512)))
     
-
+    def _apply_original_face_reducer(self, mesh_obj: Union[Mesh, FastMesh], max_faces: int = 40000) -> Union[Mesh, FastMesh]:
+        """
+        Применяет оригинальный FaceReducer алгоритм, но БЕЗ trimesh зависимости
+        Использует PyMeshLab через наш wrapper
+        """
+        try:
+            # Используем наш PyMeshLab wrapper вместо оригинального trimesh подхода
+            from pymeshlab_wrapper import pymeshlab_reduce_faces
+            
+            print(f"🔄 Reducing faces from {mesh_obj.f.shape[0]} to max {max_faces}...")
+            
+            # Если граней уже меньше максимума - не трогаем
+            if mesh_obj.f.shape[0] <= max_faces:
+                print(f"✅ Mesh уже содержит {mesh_obj.f.shape[0]} граней (≤ {max_faces})")
+                return mesh_obj
+            
+            # Применяем оригинальный алгоритм через PyMeshLab
+            reduced_mesh = pymeshlab_reduce_faces(
+                mesh_obj, 
+                max_faces=max_faces,
+                quality_threshold=1.0,
+                preserve_boundary=True,
+                boundary_weight=3,
+                preserve_normal=True,
+                preserve_topology=True,
+                autoclean=True
+            )
+            
+            print(f"✅ Face reduction: {mesh_obj.f.shape[0]} → {reduced_mesh.f.shape[0]} граней")
+            return reduced_mesh
+            
+        except Exception as e:
+            print(f"⚠️ Original face reducer error: {e}, возвращаем исходный mesh")
+            return mesh_obj
+    
 
 
 class Hunyuan3D_21_TexGen_Complete:
