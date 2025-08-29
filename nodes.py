@@ -5601,9 +5601,14 @@ class Hunyuan3D_21_ShapeGen:
         total_start = time.time()
         print(f"🏁 Начинаем ОРИГИНАЛЬНЫЙ цикл ShapeGen (с trimesh)...")
         
+        # Подготовка изображения
+        prep_start = time.time()
+        pil_image = torch_imgs_to_pils(image)[0].convert("RGBA")
+        prep_time = time.time() - prep_start
+        print(f"⏱️ Подготовка изображения: {prep_time:.3f}с")
+        
         # Background removal
         bg_start = time.time()
-        pil_image = torch_imgs_to_pils(image)[0].convert("RGBA")
         
         if remove_background or pil_image.mode == "RGB":
             rmbg_worker = BackgroundRemover_2_1()
@@ -5612,9 +5617,12 @@ class Hunyuan3D_21_ShapeGen:
         bg_time = time.time() - bg_start
         print(f"⏱️ Background removal: {bg_time:.3f}с")
 
-        # Генерация
+        # Генератор
+        gen_setup_start = time.time()
         generator = torch.Generator(device=shapegen_pipe.device)
         generator = generator.manual_seed(int(seed))
+        gen_setup_time = time.time() - gen_setup_start
+        print(f"⏱️ Настройка генератора: {gen_setup_time:.3f}с")
         
         print(f"🚀 Запуск ОРИГИНАЛЬНОГО ShapeGen: {steps} шагов, guidance={guidance_scale}")
         generation_start = time.time()
@@ -5661,10 +5669,12 @@ class Hunyuan3D_21_ShapeGen:
         
         # Итоговая сводка
         total_time = time.time() - total_start
-        print(f"🏆 ИТОГОВАЯ СВОДКА (ОРИГИНАЛЬНЫЙ):")
+        print(f"🏆 ИТОГОВАЯ СВОДКА (ОРИГИНАЛЬНЫЙ trimesh):")
         print(f"  📊 Результат: {mesh_out.v.shape[0]} вершин, {mesh_out.f.shape[0]} граней")
         print(f"  ⏱️ ОБЩЕЕ ВРЕМЯ: {total_time:.2f}с")
+        print(f"  🔹 Подготовка изображения: {prep_time:.3f}с ({prep_time/total_time*100:.1f}%)")
         print(f"  🔹 Background removal: {bg_time:.3f}с ({bg_time/total_time*100:.1f}%)")
+        print(f"  🔹 Настройка генератора: {gen_setup_time:.3f}с ({gen_setup_time/total_time*100:.1f}%)")
         print(f"  🔹 Генерация: {generation_time:.2f}с ({generation_time/total_time*100:.1f}%)")
         print(f"  🔹 Экспорт в trimesh: {export_time:.2f}с ({export_time/total_time*100:.1f}%)")
         if auto_cleanup:
@@ -5672,6 +5682,7 @@ class Hunyuan3D_21_ShapeGen:
         print(f"  🔹 Конвертация → Mesh: {convert_time:.3f}с ({convert_time/total_time*100:.1f}%)")
         
         return (mesh_out, processed_image_tensor)
+
 
 class Hunyuan3D_21_TexGen:
     """Hunyuan3D-2.1 Texture Generation"""
@@ -6235,10 +6246,15 @@ class Hunyuan3D_21_ShapeGen_Complete:
         try:
             total_start = time.time()
             print(f"🏁 Начинаем полный цикл ShapeGen...")
+            
             # Подготовка изображения
+            prep_start = time.time()
             pil_image = torch_imgs_to_pils(image)[0]
+            prep_time = time.time() - prep_start
+            print(f"⏱️ Подготовка изображения: {prep_time:.3f}с")
             
             # Background removal
+            bg_start = time.time()
             if remove_background:
                 try:
                     bg_remover = BackgroundRemover_2_1()
@@ -6247,9 +6263,14 @@ class Hunyuan3D_21_ShapeGen_Complete:
                     del bg_remover
                 except Exception as e:
                     print(f"⚠️ Background removal failed: {e}")
+            bg_time = time.time() - bg_start
+            print(f"⏱️ Background removal: {bg_time:.3f}с")
             
-            # Генерация
+            # Генератор
+            gen_setup_start = time.time()
             generator = torch.Generator(device=shapegen_pipe.device).manual_seed(seed)
+            gen_setup_time = time.time() - gen_setup_start
+            print(f"⏱️ Настройка генератора: {gen_setup_time:.3f}с")
             
             print(f"🚀 Запуск ShapeGen: {steps} шагов, guidance={guidance_scale}")
             generation_start = time.time()
@@ -6325,9 +6346,12 @@ class Hunyuan3D_21_ShapeGen_Complete:
             processed_image_tensor = pils_to_torch_imgs([pil_image])
             
             total_time = time.time() - total_start
-            print(f"🏆 ИТОГОВАЯ СВОДКА:")
+            print(f"🏆 ИТОГОВАЯ СВОДКА (НОВЫЙ FastMesh):")
             print(f"  📊 Результат: {mesh_out.v.shape[0]} вершин, {mesh_out.f.shape[0]} граней")
             print(f"  ⏱️ ОБЩЕЕ ВРЕМЯ: {total_time:.2f}с")
+            print(f"  🔹 Подготовка изображения: {prep_time:.3f}с ({prep_time/total_time*100:.1f}%)")
+            print(f"  🔹 Background removal: {bg_time:.3f}с ({bg_time/total_time*100:.1f}%)")
+            print(f"  🔹 Настройка генератора: {gen_setup_time:.3f}с ({gen_setup_time/total_time*100:.1f}%)")
             print(f"  🔹 Генерация: {generation_time:.2f}с ({generation_time/total_time*100:.1f}%)")
             print(f"  🔹 Экспорт: {export_time:.2f}с ({export_time/total_time*100:.1f}%)")
             if 'reduction_time' in locals():
@@ -6379,7 +6403,6 @@ class Hunyuan3D_21_ShapeGen_Complete:
         except Exception as e:
             print(f"⚠️ Original face reducer error: {e}, возвращаем исходный mesh")
             return mesh_obj
-
 
 class Hunyuan3D_21_TexGen_Complete:
     """Hunyuan3D-2.1 Texture Generation - ПОЛНАЯ ВЕРСИЯ с FastMesh"""
