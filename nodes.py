@@ -5998,3 +5998,288 @@ class PartCrafter_Generate:
         print(f"GLB mesh path for Preview_3DMesh: {relative_scene_path}")
         
         return (zip_path, relative_scene_path, processed_image_tensor)
+
+class DeleteFilesInFolder:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "folder_path": ("STRING", {"default": "/home/ubuntu/output"}),
+                "trigger_INT": ("INT", {"default": 0})
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "delete_files"
+    CATEGORY = "FileOps"
+
+    def delete_files(self, folder_path, trigger_INT):
+        if not os.path.isdir(folder_path):
+            return (f"❌ Not a directory: {folder_path}",)
+
+        deleted_count = 0
+        for filename in os.listdir(folder_path):
+            path = os.path.join(folder_path, filename)
+            if os.path.isfile(path):
+                try:
+                    os.remove(path)
+                    deleted_count += 1
+                except Exception as e:
+                    return (f"❌ Error deleting {filename}: {str(e)}",)
+        
+        result_text = f"✅ Deleted files: {deleted_count}"
+        print(result_text)
+        return (result_text,)
+
+class Hunyuan3D_Batch_Folder_Pipeline:
+    """Батч-обработка папки с картинками через полный пайплайн Hunyuan3D"""
+    CATEGORY = "Comfy3D/Algorithm"
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("output_summary",)
+    FUNCTION = "process_folder"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "hunyuan3d_pipe": ("HUNYUAN3D_PIPE",),
+                "hunyuan3d_texgen_pipe": ("HUNYUAN3D_TEXGEN_PIPE",),
+                "input_folder_path": ("STRING", {"forceInput": True}),
+                "output_folder_path": ("STRING", {"forceInput": True}),
+                "use_background_remover": ("BOOLEAN", {"default": True}),
+                "num_inference_steps": ("INT", {"default": 30, "min": 1, "max": 200}),
+                "guidance_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 20.0, "step": 0.1}),
+                "octree_resolution": ("INT", {"default": 256, "min": 16, "max": 512, "step": 16}),
+                "seed": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff}),
+                "postprocess": ("BOOLEAN", {"default": True}),
+            },
+            "optional": {
+                "max_files": ("INT", {"default": -1, "min": -1, "max": 1000}),
+            }
+        }
+
+    def _normalize_filename(self, filename):
+        """Нормализует имя файла, убирая лишние нули"""
+        import re
+        
+        # Извлекаем номер из имени файла
+        match = re.search(r'(\d+)', filename)
+        if match:
+            number = int(match.group(1))
+            return f"frame_{number}"
+        else:
+            # Если номер не найден, используем порядковый номер
+            return filename
+
+    def _get_sorted_image_files(self, folder_path):
+        """Получает отсортированный список PNG файлов"""
+        import glob
+        
+        # Получаем все PNG файлы
+        file_paths = glob.glob(os.path.join(folder_path, "*.png"))
+        
+        # Сортируем по имени файла
+        file_paths.sort()
+        
+        return file_paths
+
+    def _load_image_as_pil(self, image_path):
+        """Загружает PNG изображение как PIL"""
+        from PIL import Image
+        return Image.open(image_path).convert('RGBA')
+    
+    def _process_with_background_remover(self, pil_image):
+        """Обрабатывает изображение через Multi_Background_Remover логику"""
+        if not HUNYUAN3D_AVAILABLE:
+            raise RuntimeError("Hunyuan3D modules not available")
+        
+        # Преобразуем PIL в torch tensor для обработки
+        torch_image = pils_to_torch_imgs([pil_image], device=DEVICE_STR)
+        
+        # Применяем ту же логику что и в Multi_Background_Remover
+        rmbg = BackgroundRemover()
+        processed_pil = torch_imgs_to_pils(torch_image)[0].convert("RGBA")
+        
+        if processed_pil.mode == "RGB":
+            processed_pil = rmbg(processed_pil.convert("RGB"))
+            
+        return processed_pil
+
+    def process_folder(self, hunyuan3d_pipe, hunyuan3d_texgen_pipe, input_folder_path, output_folder_path,
+                      use_background_remover, num_inference_steps, guidance_scale, octree_resolution,
+                      seed, postprocess, max_files=-1):
+        
+        if not HUNYUAN3D_AVAILABLE:
+            raise RuntimeError("Hunyuan3D modules not available")
+        
+        import glob
+        from PIL import Image
+        
+        print(f"Начинаем батч-обработку папки: {input_folder_path}")
+        print(f"Формат файлов: PNG")
+        print(f"Выходная папка: {output_folder_path}")
+        print(f"Использовать Background Remover: {use_background_remover}")
+        
+        # Получаем отсортированный список PNG файлов
+        image_files = self._get_sorted_image_files(input_folder_path)
+        
+        if not image_files:
+            raise RuntimeError(f"Не найдено PNG изображений в папке {input_folder_path}")
+        
+        # Ограничиваем количество файлов если задано
+        if max_files > 0:
+            image_files = image_files[:max_files]
+        
+        print(f"Найдено PNG файлов для обработки: {len(image_files)}")
+        
+        # Создаем выходную папку
+        os.makedirs(output_folder_path, exist_ok=True)
+        
+        # Получение устройства из пайплайна
+        pipe_device = DEVICE_STR
+        if hasattr(hunyuan3d_pipe, 'device'):
+            pipe_device = hunyuan3d_pipe.device
+        elif hasattr(hunyuan3d_pipe, 'model') and hasattr(hunyuan3d_pipe.model, 'device'):
+            pipe_device = hunyuan3d_pipe.model.device
+        
+        processed_count = 0
+        failed_count = 0
+        summary_lines = []
+        
+        for idx, image_path in enumerate(image_files):
+            try:
+                print(f"\n--- Обработка {idx+1}/{len(image_files)}: {os.path.basename(image_path)} ---")
+                
+                # Создаем папку для данного фрейма
+                frame_name = f"frame_{idx}"
+                frame_output_dir = os.path.join(output_folder_path, frame_name)
+                os.makedirs(frame_output_dir, exist_ok=True)
+                
+                # Загружаем изображение
+                input_image = self._load_image_as_pil(image_path)
+                rmbg = BackgroundRemover()
+                
+                # Применяем Background Remover если включен
+                if use_background_remover:
+                    if input_image.mode == 'RGB':
+                        input_image = rmbg(input_image)
+                    print("Фон удален")
+                
+                # Сохраняем обработанное изображение
+                processed_image_path = os.path.join(frame_output_dir, "processed_frame.png")
+                input_image.save(processed_image_path)
+                
+                # Установка seed если указан
+                if seed != -1:
+                    generator = torch.Generator(device=pipe_device)
+                    generator.manual_seed(seed)
+                else:
+                    generator = None
+                
+                print(f"Генерация 3D формы (seed: {seed if seed != -1 else 'random'})...")
+                
+                # Генерация 3D формы
+                mesh_outputs = hunyuan3d_pipe(
+                    image=input_image,
+                    num_inference_steps=num_inference_steps,
+                    guidance_scale=guidance_scale,
+                    generator=generator,
+                    octree_resolution=octree_resolution,
+                    output_type='mesh'
+                )
+                
+                # Преобразование в trimesh
+                if isinstance(mesh_outputs, list):
+                    trimesh_mesh = export_to_trimesh(mesh_outputs)[0]
+                else:
+                    trimesh_mesh = export_to_trimesh([mesh_outputs])[0]
+                
+                # Постобработка если включена
+                if postprocess:
+                    print("Постобработка меша...")
+                    face_reducer = FaceReducer()
+                    trimesh_mesh = face_reducer(trimesh_mesh)
+                
+                # Сохранение формы
+                shape_path = os.path.join(frame_output_dir, "shape.glb")
+                trimesh_mesh.export(shape_path)
+                print(f"3D форма сохранена: {shape_path}")
+                
+                # Генерация текстуры
+                print("Генерация текстуры...")
+                textured_mesh = hunyuan3d_texgen_pipe(trimesh_mesh, input_image)
+                
+                # Сохранение текстурированного меша
+                textured_path = os.path.join(frame_output_dir, "textured_mesh.glb")
+                textured_mesh.export(textured_path)
+                print(f"Текстурированный меш сохранен: {textured_path}")
+                
+                processed_count += 1
+                summary_lines.append(f"✓ {frame_name}: успешно обработан")
+                
+                print(f"Фрейм {frame_name} обработан успешно!")
+                
+            except Exception as e:
+                failed_count += 1
+                error_msg = f"✗ frame_{idx}: ошибка - {str(e)}"
+                summary_lines.append(error_msg)
+                print(f"Ошибка при обработке {os.path.basename(image_path)}: {e}")
+                continue
+        
+        # Создаем итоговый отчет
+        summary = f"""
+Батч-обработка завершена!
+
+Статистика:
+- Всего файлов: {len(image_files)}
+- Успешно обработано: {processed_count}
+- Ошибок: {failed_count}
+
+Входная папка: {input_folder_path}
+Выходная папка: {output_folder_path}
+
+Детали:
+""" + "\n".join(summary_lines)
+        
+        print(summary)
+        
+        # Сохраняем отчет в файл
+        report_path = os.path.join(output_folder_path, "batch_processing_report.txt")
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write(summary)
+        
+        return (summary,)
+
+class Save3DMeshAdvanced:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "mesh": ("MESH",),
+                "folder_path": ("STRING",),
+                "file_name": ("STRING",),
+                "file_format": (["glb", "obj", "ply"],),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("save_path",)
+    FUNCTION = "save_mesh"
+    CATEGORY = "Comfy3D/Import|Export"
+    OUTPUT_NODE = True
+
+    def save_mesh(self, mesh, folder_path, file_name, file_format):
+        base_dir = comfy_paths.output_directory
+        if folder_path.strip() != "":
+            base_dir = os.path.join(base_dir, folder_path.strip())
+
+        os.makedirs(base_dir, exist_ok=True)
+
+        file_name = os.path.splitext(file_name.strip())[0]
+
+        full_path = os.path.join(base_dir, f"{file_name}.{file_format}")
+
+        mesh.write(full_path)
+
+        return (full_path,)    
+    
